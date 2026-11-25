@@ -126,13 +126,133 @@ interface TemporalPlainDateLike {
   toString(): string
 }
 
+interface TemporalDurationLike {
+  readonly hours: number
+  readonly minutes: number
+  round(options: { largestUnit: 'hour' }): TemporalDurationLike
+  toString(): string
+}
+
 interface TemporalGlobalLike {
   PlainDate?: {
     from(item: string, options?: { overflow?: 'constrain' | 'reject' }): TemporalPlainDateLike
   }
+  Duration?: {
+    from(item: { minutes: number }): TemporalDurationLike
+  }
   Now?: {
     plainDateISO(): TemporalPlainDateLike
   }
+}
+
+interface IntlDurationFormatLike {
+  format(duration: { hours?: number; minutes?: number }): string
+}
+
+interface IntlWithDurationFormat {
+  DurationFormat?: new (
+    locales?: string | string[],
+    options?: { style?: 'long' | 'short' | 'narrow' | 'digital' },
+  ) => IntlDurationFormatLike
+}
+
+export interface FormattedDuration {
+  label: string
+  longLabel: string
+  iso: string
+  totalMinutes: number
+}
+
+const durationFormatterCache = new Map<'narrow' | 'long', IntlDurationFormatLike | null>()
+
+function getDurationFormatter(style: 'narrow' | 'long'): IntlDurationFormatLike | null {
+  if (durationFormatterCache.has(style)) {
+    return durationFormatterCache.get(style) ?? null
+  }
+  const DurationFormatCtor = (Intl as IntlWithDurationFormat).DurationFormat
+  if (typeof DurationFormatCtor !== 'function') {
+    durationFormatterCache.set(style, null)
+    return null
+  }
+  try {
+    const formatter = new DurationFormatCtor('en-US', { style })
+    durationFormatterCache.set(style, formatter)
+    return formatter
+  } catch {
+    durationFormatterCache.set(style, null)
+    return null
+  }
+}
+
+function formatDurationFallback(hours: number, minutes: number, style: 'narrow' | 'long'): string {
+  const parts: string[] = []
+  if (style === 'narrow') {
+    if (hours > 0) {
+      parts.push(`${hours}h`)
+    }
+    if (minutes > 0) {
+      parts.push(`${minutes}m`)
+    }
+    return parts.join(' ')
+  }
+  if (hours > 0) {
+    parts.push(`${hours} ${hours === 1 ? 'hour' : 'hours'}`)
+  }
+  if (minutes > 0) {
+    parts.push(`${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`)
+  }
+  return parts.join(', ')
+}
+
+/**
+ * Formats a positive duration in minutes into compact (`42m`, `1h 8m`), long (`1 hour, 8 minutes`),
+ * and ISO 8601 (`PT1H8M`) strings using `Temporal.Duration` and `Intl.DurationFormat` when available.
+ */
+export function formatDurationMinutes(rawMinutes: number | string | null | undefined): FormattedDuration | null {
+  const numeric =
+    typeof rawMinutes === 'number'
+      ? rawMinutes
+      : typeof rawMinutes === 'string' && /^\d+(?:\.\d+)?$/.test(rawMinutes.trim())
+        ? Number(rawMinutes.trim())
+        : NaN
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return null
+  }
+  const totalMinutes = Math.round(numeric)
+  if (totalMinutes <= 0) {
+    return null
+  }
+
+  const temporal = getTemporalApi()
+  let hours: number
+  let minutes: number
+  let iso: string
+
+  if (temporal?.Duration) {
+    const balanced = temporal.Duration.from({ minutes: totalMinutes }).round({ largestUnit: 'hour' })
+    hours = balanced.hours
+    minutes = balanced.minutes
+    iso = balanced.toString()
+  } else {
+    hours = Math.floor(totalMinutes / 60)
+    minutes = totalMinutes % 60
+    iso = `PT${hours > 0 ? `${hours}H` : ''}${minutes > 0 ? `${minutes}M` : ''}`
+  }
+
+  const parts: { hours?: number; minutes?: number } = {}
+  if (hours > 0) {
+    parts.hours = hours
+  }
+  if (minutes > 0) {
+    parts.minutes = minutes
+  }
+
+  const narrowFormatter = getDurationFormatter('narrow')
+  const longFormatter = getDurationFormatter('long')
+  const label = narrowFormatter ? narrowFormatter.format(parts) : formatDurationFallback(hours, minutes, 'narrow')
+  const longLabel = longFormatter ? longFormatter.format(parts) : formatDurationFallback(hours, minutes, 'long')
+
+  return { label, longLabel, iso, totalMinutes }
 }
 
 function getTemporalApi(): TemporalGlobalLike | null {

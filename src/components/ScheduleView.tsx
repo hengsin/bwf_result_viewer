@@ -21,7 +21,7 @@ import {
   savePinnedMatchKeys,
   toSafeFlagUrl,
 } from '../lib/schedule'
-import type { MatchStartNotification } from '../lib/schedule'
+import type { ActualStartTimesMap, MatchStartNotification, MatchTimeView } from '../lib/schedule'
 import { CountryFlag } from './CountryFlag'
 import { CourtSidebar } from './CourtSidebar'
 import type { CourtSummary, PinnedSidebarItem } from './CourtSidebar'
@@ -241,12 +241,15 @@ function PinIcon({ filled }: { filled: boolean }) {
   )
 }
 
-function renderScore(match: DayMatch): ReactNode {
+function renderScore(match: DayMatch, view: MatchTimeView): ReactNode {
   const score = (match.score ?? []) as Array<{ home?: number; away?: number; serve?: number; lastPointWinner?: number }>
-  if (!score || score.length === 0) {
+  const hasScore = score.length > 0
+  const hasDuration = view.durationLabel !== null && view.durationIso !== null
+  if (!hasScore && !hasDuration) {
     return null
   }
   const live = isMatchLive(match)
+  const durationAccessibleLabel = `Match duration: ${view.durationLongLabel ?? view.durationLabel}`
   return (
     <div className={`match-score${live ? ' is-live' : ''}`}>
       {score.map((set, index) => {
@@ -262,6 +265,31 @@ function renderScore(match: DayMatch): ReactNode {
           </span>
         )
       })}
+      {hasDuration && view.durationIso ? (
+        <time
+          className="match-duration"
+          dateTime={view.durationIso}
+          title={durationAccessibleLabel}
+          aria-label={durationAccessibleLabel}
+        >
+          <svg
+            className="match-duration-icon"
+            viewBox="0 0 16 16"
+            width="13"
+            height="13"
+            aria-hidden="true"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="8" cy="8" r="6" />
+            <path d="M8 4.75V8l2.25 1.5" />
+          </svg>
+          <span>{view.durationLabel}</span>
+        </time>
+      ) : null}
     </div>
   )
 }
@@ -312,6 +340,7 @@ interface ScheduleViewProps {
   onSelectedCountryChange: (countryCode: string) => void
   autoRefresh: boolean
   onEnableAutoRefresh: () => void
+  actualStartTimes: Readonly<ActualStartTimesMap>
 }
 
 export function ScheduleView({
@@ -327,6 +356,7 @@ export function ScheduleView({
   onSelectedCountryChange,
   autoRefresh,
   onEnableAutoRefresh,
+  actualStartTimes,
 }: ScheduleViewProps) {
   const localTz = getBrowserTimeZone()
   const scheduleScopeKey = `${tournamentCode}:${contextDate}`
@@ -347,8 +377,17 @@ export function ScheduleView({
   const lastScopeKeyRef = useRef<string>(scheduleScopeKey)
 
   const allViews = useMemo(
-    () => buildOrderedScheduleViews(matches, sourceTimeZone, contextDate, localTz, tournamentCode, nowMs),
-    [matches, sourceTimeZone, contextDate, localTz, tournamentCode, nowMs],
+    () =>
+      buildOrderedScheduleViews(
+        matches,
+        sourceTimeZone,
+        contextDate,
+        localTz,
+        tournamentCode,
+        nowMs,
+        actualStartTimes,
+      ),
+    [matches, sourceTimeZone, contextDate, localTz, tournamentCode, nowMs, actualStartTimes],
   )
 
   const countries = useMemo(() => buildCountryOptions(matches), [matches])
@@ -1177,7 +1216,33 @@ export function ScheduleView({
                     >
                       <div className="match-time">
                         <span className="match-time-value">{view.timeLabel}</span>
-                        {view.isTimeAdjusted ? (
+                        {view.isActualStartTime ? (
+                          <span
+                            className="match-time-actual"
+                            title={
+                              view.actualStartTimeLabel !== view.scheduledTimeLabel
+                                ? `Actual start time captured when match began (scheduled: ${view.scheduledTimeLabel})`
+                                : 'Actual start time captured when match began'
+                            }
+                          >
+                            {view.actualStartTimeLabel !== view.scheduledTimeLabel
+                              ? `Actual · sched. ${view.scheduledTimeLabel}`
+                              : 'Actual start'}
+                          </span>
+                        ) : view.isCalculatedStartTime ? (
+                          <span
+                            className="match-time-adjusted"
+                            title={
+                              view.timeLabel !== view.scheduledTimeLabel
+                                ? `Calculated from previous match + duration + 8m gap (scheduled: ${view.scheduledTimeLabel})`
+                                : 'Calculated from previous match + duration + 8m gap'
+                            }
+                          >
+                            {view.timeLabel !== view.scheduledTimeLabel
+                              ? `Calc. · sched. ${view.scheduledTimeLabel}`
+                              : 'Calc. start'}
+                          </span>
+                        ) : view.isTimeAdjusted ? (
                           <span
                             className="match-time-adjusted"
                             title={`Estimated from the current in-progress match (original schedule: ${view.scheduledTimeLabel})`}
@@ -1237,7 +1302,7 @@ export function ScheduleView({
                           />
                         </div>
 
-                        {renderScore(match)}
+                        {renderScore(match, view)}
                         {view.oopLabel ? <div className="match-schedule">{view.oopLabel}</div> : null}
                       </div>
 

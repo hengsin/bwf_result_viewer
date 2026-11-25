@@ -2258,6 +2258,15 @@ progress.loading-spinner.is-sm:indeterminate {
   margin-top: 2px;
 }
 
+.match-time-actual {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--live);
+  line-height: 1.3;
+  margin-top: 2px;
+}
+
 .match-live-eta {
   align-self: flex-start;
   font-size: var(--text-sm);
@@ -2459,8 +2468,29 @@ progress.loading-spinner.is-sm:indeterminate {
 /* Broadcast Scoreboard Strip */
 .match-score {
   display: flex;
+  align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+.match-duration {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-inline-start: 4px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.match-duration:first-child {
+  margin-inline-start: 0;
+}
+
+.match-duration-icon {
+  flex: none;
 }
 
 .match-set {

@@ -1,6 +1,7 @@
 import type { BwfPlayer, BwfTeam, DayMatch } from './bwf'
 import {
   convertTimeText,
+  formatDurationMinutes,
   formatLongDate,
   formatTimeOfDay,
   sourceWallTimeToInstant,
@@ -12,11 +13,19 @@ export const RECENT_PREV_FINISHED_WINDOW_MS = 2 * 60 * 60 * 1000
 export const DEFAULT_MATCH_DURATION_MIN = 45
 export const DEFAULT_SET_DURATION_MIN = 20
 export const DEFAULT_MATCH_SLOT_MIN = 50
-export const MATCH_CHANGEOVER_MIN = 5
+export const MATCH_CHANGEOVER_MIN = 8
+export const ACTUAL_START_TIME_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
 const PINNED_STORAGE_KEY = 'bwf:pinned-matches:v1'
 const SOUND_STORAGE_KEY = 'bwf:alert-sound:v1'
+export const ACTUAL_START_STORAGE_KEY = 'bwf:actual-start-times:v1'
 const MAX_PINNED_STORAGE_ITEMS = 200
+const MAX_ACTUAL_START_TIME_ITEMS = 1000
+const ACTUAL_START_FUTURE_SKEW_MS = 5 * 60 * 1000
+const UNSAFE_OBJECT_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
+const REDUNDANT_OOP_TEXT_PATTERN = /^(?:starting\s+at(?:\b.*)?|followed\s+by\.?)$/i
+
+export type ActualStartTimesMap = Record<string, number>
 
 const LIVE_STATUS_CODES = new Set(['P', 'C', 'W', 'H'])
 const FINISHED_STATUS_CODES = new Set(['F', 'O'])
@@ -42,12 +51,19 @@ export interface MatchTimeView {
   sourceInstant: Date
   scheduledInstant: Date
   scheduledTimeLabel: string
+  actualStartInstant: Date | null
+  actualStartTimeLabel: string | null
+  isActualStartTime: boolean
+  isCalculatedStartTime: boolean
   localInstant: Date
   timeLabel: string
   dateLabel: string
   isTimeAdjusted: boolean
   adjustmentDeltaMinutes: number
   liveRemainingMinutes: number | null
+  durationLabel: string | null
+  durationLongLabel: string | null
+  durationIso: string | null
   oopLabel: string
   statusLabel: string
   statusTone: MatchStatusTone
@@ -341,15 +357,32 @@ function clampNumber(value: number, min: number, max: number): number {
 }
 
 /**
+ * Formats a match's Order of Play (`oopText`) into the viewer's local timezone,
+ * omitting redundant `"Starting At ..."` and `"Followed by"` labels.
+ */
+export function formatOopLabel(
+  oopText: string | null | undefined,
+  sourceTimeZone: string,
+  contextDate: string,
+): string {
+  const trimmed = (oopText ?? '').trim()
+  if (!trimmed || REDUNDANT_OOP_TEXT_PATTERN.test(trimmed)) {
+    return ''
+  }
+  return convertTimeText(trimmed, sourceTimeZone, contextDate)
+}
+
+/**
  * Estimates remaining play minutes for an in-progress match from its status, elapsed duration, and set scores.
  */
-export function estimateRemainingMatchMinutes(match: DayMatch): number {
+export function estimateRemainingMatchMinutes(match: DayMatch, fallbackElapsedMin = 0): number {
   if (match.matchStatus === 'C' || match.matchStatus === 'W') {
     return DEFAULT_MATCH_DURATION_MIN
   }
 
   const rawSets = (match.score ?? []) as ScoreSetEntry[]
-  const elapsedMin = typeof match.duration === 'number' && match.duration > 0 ? match.duration : 0
+  const apiElapsedMin = typeof match.duration === 'number' && match.duration > 0 ? match.duration : 0
+  const elapsedMin = apiElapsedMin > 0 ? apiElapsedMin : Math.max(0, fallbackElapsedMin)
 
   if (rawSets.length === 0) {
     return Math.max(10, DEFAULT_MATCH_DURATION_MIN - elapsedMin)
@@ -441,21 +474,31 @@ function adjustCourtTimesForLiveMatch(courtList: MatchTimeView[], localTz: strin
   }
 
   const liveView = courtList[liveIdx]
-  const remainingMin = estimateRemainingMatchMinutes(liveView.match)
+  const liveReferenceMs = liveView.actualStartInstant?.getTime() ?? liveView.localInstant.getTime()
+  const isWithinLiveWindow = Math.abs(nowMs - liveReferenceMs) <= 12 * 60 * 60 * 1000
+  const inferredElapsedMin =
+    (liveView.actualStartInstant !== null || liveView.isCalculatedStartTime) && isWithinLiveWindow
+      ? Math.max(0, Math.round((nowMs - liveReferenceMs) / 60_000))
+      : 0
+  const remainingMin = estimateRemainingMatchMinutes(liveView.match, inferredElapsedMin)
   liveView.liveRemainingMinutes = remainingMin
 
-  const scheduledLiveMs = liveView.scheduledInstant.getTime()
-  const elapsedMin =
+  const apiElapsedMin =
     typeof liveView.match.duration === 'number' && liveView.match.duration > 0 ? liveView.match.duration : 0
-  const isWithinLiveWindow = Math.abs(nowMs - scheduledLiveMs) <= 12 * 60 * 60 * 1000
-  const liveNowMs = isWithinLiveWindow ? nowMs : scheduledLiveMs + elapsedMin * 60_000
+  const elapsedMin = apiElapsedMin > 0 ? apiElapsedMin : inferredElapsedMin
+  const liveNowMs = isWithinLiveWindow ? nowMs : liveReferenceMs + elapsedMin * 60_000
   const estimatedLiveEndMs = liveNowMs + remainingMin * 60_000
 
   let cursorStartMs = roundToMinuteMs(estimatedLiveEndMs + MATCH_CHANGEOVER_MIN * 60_000)
 
   for (let i = liveIdx + 1; i < courtList.length; i += 1) {
     const current = courtList[i]
-    if (isMatchFinished(current.match) || isMatchLive(current.match)) {
+    if (
+      isMatchFinished(current.match) ||
+      isMatchLive(current.match) ||
+      current.isActualStartTime ||
+      current.isCalculatedStartTime
+    ) {
       continue
     }
 
@@ -501,11 +544,13 @@ export function buildOrderedScheduleViews(
   localTz: string,
   tournamentCode = '',
   nowMs: number = Date.now(),
+  actualStartTimes: Readonly<ActualStartTimesMap> = {},
 ): MatchTimeView[] {
   const byCourt = new Map<string, MatchTimeView[]>()
 
   for (const match of matches) {
     const courtName = match.courtName && match.courtName.trim() !== '' ? match.courtName.trim() : 'Court TBC'
+    const matchKey = getMatchKey(match, tournamentCode)
     const parts = parseMatchTime(match.matchTime)
     const instant = sourceWallTimeToInstant(
       parts.year,
@@ -516,10 +561,21 @@ export function buildOrderedScheduleViews(
       parts.second,
       sourceTimeZone,
     )
-    const formattedTime = formatTimeOfDay(instant, localTz)
+    const formattedScheduledTime = formatTimeOfDay(instant, localTz)
+    const rawActualStartMs = Object.hasOwn(actualStartTimes, matchKey) ? actualStartTimes[matchKey] : undefined
+    const canShowActualStart =
+      (isMatchLive(match) || isMatchFinished(match)) &&
+      match.matchStatus !== 'O' &&
+      typeof rawActualStartMs === 'number' &&
+      Number.isFinite(rawActualStartMs)
+    const actualStartInstant = canShowActualStart ? new Date(rawActualStartMs) : null
+    const actualStartTimeLabel = actualStartInstant ? formatTimeOfDay(actualStartInstant, localTz) : null
+    const displayInstant = actualStartInstant ?? instant
+    const formattedDuration = isMatchFinished(match) ? formatDurationMinutes(match.duration) : null
+
     const view: MatchTimeView = {
       match,
-      matchKey: getMatchKey(match, tournamentCode),
+      matchKey,
       anchorId: toMatchAnchorId(match),
       courtName,
       courtOrderIndex: 0,
@@ -527,14 +583,21 @@ export function buildOrderedScheduleViews(
       previousMatch: null,
       sourceInstant: instant,
       scheduledInstant: instant,
-      scheduledTimeLabel: formattedTime,
-      localInstant: instant,
-      timeLabel: formattedTime,
-      dateLabel: formatLongDate(instant, localTz),
+      scheduledTimeLabel: formattedScheduledTime,
+      actualStartInstant,
+      actualStartTimeLabel,
+      isActualStartTime: actualStartInstant !== null,
+      isCalculatedStartTime: false,
+      localInstant: displayInstant,
+      timeLabel: actualStartTimeLabel ?? formattedScheduledTime,
+      dateLabel: formatLongDate(displayInstant, localTz),
       isTimeAdjusted: false,
       adjustmentDeltaMinutes: 0,
       liveRemainingMinutes: null,
-      oopLabel: convertTimeText(match.oopText || '', sourceTimeZone, contextDate),
+      durationLabel: formattedDuration?.label ?? null,
+      durationLongLabel: formattedDuration?.longLabel ?? null,
+      durationIso: formattedDuration?.iso ?? null,
+      oopLabel: formatOopLabel(match.oopText, sourceTimeZone, contextDate),
       statusLabel: statusLabelFor(match),
       statusTone: getMatchStatusTone(match),
       countryCodes: extractMatchCountryCodes(match),
@@ -559,6 +622,35 @@ export function buildOrderedScheduleViews(
         const previous = courtList[i - 1]
         current.previousMatch = previous.match
         current.previousMatchKey = previous.matchKey
+
+        const prevDurationMin = previous.match.duration
+        if (
+          !current.isActualStartTime &&
+          current.match.matchStatus !== 'O' &&
+          isMatchFinished(previous.match) &&
+          previous.match.matchStatus !== 'O' &&
+          typeof prevDurationMin === 'number' &&
+          Number.isFinite(prevDurationMin) &&
+          prevDurationMin > 0
+        ) {
+          const prevStartMs = previous.localInstant.getTime()
+          const candidateMs = roundToMinuteMs(
+            prevStartMs + (Math.round(prevDurationMin) + MATCH_CHANGEOVER_MIN) * 60_000,
+          )
+          const hasTimeFloor = current.match.oopTypeId === 1 || current.match.oopTypeId === 2
+          const calculatedMs = hasTimeFloor
+            ? Math.max(current.scheduledInstant.getTime(), candidateMs)
+            : candidateMs
+          const calculatedInstant = new Date(calculatedMs)
+          const deltaMin = Math.round((calculatedMs - current.scheduledInstant.getTime()) / 60_000)
+          current.sourceInstant = calculatedInstant
+          current.localInstant = calculatedInstant
+          current.timeLabel = formatTimeOfDay(calculatedInstant, localTz)
+          current.dateLabel = formatLongDate(calculatedInstant, localTz)
+          current.isCalculatedStartTime = true
+          current.isTimeAdjusted = deltaMin !== 0
+          current.adjustmentDeltaMinutes = deltaMin
+        }
       }
     }
     adjustCourtTimesForLiveMatch(courtList, localTz, nowMs)
@@ -852,6 +944,138 @@ export function saveAlertSoundEnabled(enabled: boolean): void {
   } catch {
     // Ignore storage quota / private mode failures.
   }
+}
+
+export interface DetectNewlyStartedParams {
+  matches: readonly DayMatch[]
+  tournamentCode: string
+  previousUpcomingByKey: ReadonlyMap<string, boolean>
+  existingActualStartTimes: Readonly<ActualStartTimesMap>
+  nowMs: number
+}
+
+/**
+ * Detects matches that transitioned from an upcoming/scheduled state (`N` / `S`) into an active
+ * court state (`C` On court, `W` Warm-up, `P` In progress, `H` Challenge) and returns newly
+ * captured actual start timestamps (`matchKey -> epoch ms`).
+ */
+export function detectNewlyStartedMatchTimes({
+  matches,
+  tournamentCode,
+  previousUpcomingByKey,
+  existingActualStartTimes,
+  nowMs,
+}: DetectNewlyStartedParams): ActualStartTimesMap {
+  const captured: ActualStartTimesMap = {}
+  const roundedNow = Math.round(nowMs)
+  for (const match of matches) {
+    const matchKey = getMatchKey(match, tournamentCode)
+    if (Object.hasOwn(existingActualStartTimes, matchKey)) {
+      continue
+    }
+    if (previousUpcomingByKey.get(matchKey) === true && isMatchLive(match) && !isMatchFinished(match)) {
+      captured[matchKey] = roundedNow
+    }
+  }
+  return captured
+}
+
+/**
+ * Filters a raw persisted map of actual start times, dropping invalid entries,
+ * expired records older than `ACTUAL_START_TIME_TTL_MS` (7 days), and capping total size.
+ */
+export function pruneActualStartTimes(
+  entries: Readonly<Record<string, unknown>>,
+  nowMs: number = Date.now(),
+): ActualStartTimesMap {
+  const minAllowed = nowMs - ACTUAL_START_TIME_TTL_MS
+  const maxAllowed = nowMs + ACTUAL_START_FUTURE_SKEW_MS
+  const valid: Array<[string, number]> = []
+
+  for (const [key, value] of Object.entries(entries)) {
+    if (
+      key.length === 0 ||
+      key.length > 160 ||
+      UNSAFE_OBJECT_KEYS.has(key) ||
+      typeof value !== 'number' ||
+      !Number.isFinite(value)
+    ) {
+      continue
+    }
+    const rounded = Math.round(value)
+    if (rounded >= minAllowed && rounded <= maxAllowed) {
+      valid.push([key, rounded])
+    }
+  }
+
+  if (valid.length > MAX_ACTUAL_START_TIME_ITEMS) {
+    valid.sort((a, b) => b[1] - a[1])
+    valid.length = MAX_ACTUAL_START_TIME_ITEMS
+  }
+
+  const pruned: ActualStartTimesMap = {}
+  for (const [key, timestamp] of valid) {
+    pruned[key] = timestamp
+  }
+  return pruned
+}
+
+export function loadActualStartTimes(nowMs: number = Date.now()): ActualStartTimesMap {
+  if (typeof window === 'undefined') {
+    return {}
+  }
+  try {
+    const raw = window.localStorage.getItem(ACTUAL_START_STORAGE_KEY)
+    if (!raw) {
+      return {}
+    }
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {}
+    }
+    const record = parsed as Record<string, unknown>
+    const pruned = pruneActualStartTimes(record, nowMs)
+    if (Object.keys(pruned).length !== Object.keys(record).length) {
+      try {
+        window.localStorage.setItem(ACTUAL_START_STORAGE_KEY, JSON.stringify(pruned))
+      } catch {
+        // Ignore storage quota / private mode failures during pruning.
+      }
+    }
+    return pruned
+  } catch {
+    return {}
+  }
+}
+
+export function saveActualStartTimes(
+  entries: Readonly<ActualStartTimesMap>,
+  nowMs: number = Date.now(),
+): ActualStartTimesMap {
+  const pruned = pruneActualStartTimes(entries, nowMs)
+  if (typeof window === 'undefined') {
+    return pruned
+  }
+  try {
+    window.localStorage.setItem(ACTUAL_START_STORAGE_KEY, JSON.stringify(pruned))
+  } catch {
+    // Ignore storage quota / private mode failures.
+  }
+  return pruned
+}
+
+export function subscribeActualStartTimesStorage(onChange: (next: ActualStartTimesMap) => void): () => void {
+  if (typeof window === 'undefined') {
+    return () => undefined
+  }
+  const listener = (event: StorageEvent) => {
+    if (event.key !== ACTUAL_START_STORAGE_KEY && event.key !== null) {
+      return
+    }
+    onChange(loadActualStartTimes())
+  }
+  window.addEventListener('storage', listener)
+  return () => window.removeEventListener('storage', listener)
 }
 
 export function playNotificationChime(): void {

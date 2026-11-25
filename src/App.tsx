@@ -25,6 +25,15 @@ import {
   type ThemePreference,
 } from './lib/theme'
 import { getCurrentWeekDays, getCurrentYearAndMonth, getTodayIsoDate, isValidTimeZone } from './lib/time'
+import {
+  detectNewlyStartedMatchTimes,
+  getMatchKey,
+  isMatchUpcoming,
+  loadActualStartTimes,
+  saveActualStartTimes,
+  subscribeActualStartTimesStorage,
+  type ActualStartTimesMap,
+} from './lib/schedule'
 import { CurrentMonthTournaments } from './components/CurrentMonthTournaments'
 import { ScheduleView } from './components/ScheduleView'
 import { PageView } from './components/PageView'
@@ -89,6 +98,7 @@ export default function App() {
   const [selectedCountry, setSelectedCountry] = useState('')
   const [themePreference, setThemePreference] = useState<ThemePreference>(() => loadThemePreference())
   const [systemTheme, setSystemTheme] = useState<ResolvedTheme>(() => getSystemTheme())
+  const [actualStartTimes, setActualStartTimes] = useState<ActualStartTimesMap>(() => loadActualStartTimes())
   const [calendarTournaments, setCalendarTournaments] = useState<CalendarTournament[]>([])
   const [calendarLoading, setCalendarLoading] = useState(true)
   const [calendarError, setCalendarError] = useState<string | null>(null)
@@ -98,6 +108,15 @@ export default function App() {
 
   const manualTimeZoneOverrideRef = useRef(false)
   const sourceTimeZoneRef = useRef(sourceTimeZone)
+  const autoRefreshRef = useRef(autoRefresh)
+  const autoRefreshIntervalSecRef = useRef(autoRefreshIntervalSec)
+  const actualStartTimesRef = useRef(actualStartTimes)
+  const matchSnapshotRef = useRef<{
+    scopeKey: string
+    upcomingByKey: Map<string, boolean>
+    fetchedAtMs: number
+    autoRefreshWasEnabled: boolean
+  } | null>(null)
   const loadIdRef = useRef(0)
   const selectTournamentSeqRef = useRef(0)
   const urlInputRef = useRef<HTMLInputElement | null>(null)
@@ -187,6 +206,30 @@ export default function App() {
   }, [sourceTimeZone])
 
   useEffect(() => {
+    autoRefreshRef.current = autoRefresh
+    if (!autoRefresh && matchSnapshotRef.current) {
+      matchSnapshotRef.current.autoRefreshWasEnabled = false
+    }
+  }, [autoRefresh])
+
+  useEffect(() => {
+    autoRefreshIntervalSecRef.current = autoRefreshIntervalSec
+  }, [autoRefreshIntervalSec])
+
+  useEffect(() => {
+    actualStartTimesRef.current = actualStartTimes
+  }, [actualStartTimes])
+
+  useEffect(
+    () =>
+      subscribeActualStartTimesStorage((next) => {
+        actualStartTimesRef.current = next
+        setActualStartTimes(next)
+      }),
+    [],
+  )
+
+  useEffect(() => {
     applyThemeMeta(themePreference)
   }, [themePreference])
 
@@ -224,6 +267,46 @@ export default function App() {
         const matches = await fetchDayMatches(details.tournament.code, contextDate)
         if (loadId !== loadIdRef.current) {
           return
+        }
+
+        const scopeKey = `${details.tournament.code}:${contextDate}`
+        const fetchedAtMs = Date.now()
+        const prevSnapshot = matchSnapshotRef.current
+        const maxPollGapMs = Math.max(autoRefreshIntervalSecRef.current * 1000 * 2, 3 * 60 * 1000)
+
+        if (
+          prevSnapshot &&
+          prevSnapshot.scopeKey === scopeKey &&
+          prevSnapshot.autoRefreshWasEnabled &&
+          autoRefreshRef.current &&
+          fetchedAtMs - prevSnapshot.fetchedAtMs <= maxPollGapMs
+        ) {
+          const newlyCaptured = detectNewlyStartedMatchTimes({
+            matches,
+            tournamentCode: details.tournament.code,
+            previousUpcomingByKey: prevSnapshot.upcomingByKey,
+            existingActualStartTimes: actualStartTimesRef.current,
+            nowMs: fetchedAtMs,
+          })
+          if (Object.keys(newlyCaptured).length > 0) {
+            const merged = saveActualStartTimes(
+              { ...actualStartTimesRef.current, ...newlyCaptured },
+              fetchedAtMs,
+            )
+            actualStartTimesRef.current = merged
+            setActualStartTimes(merged)
+          }
+        }
+
+        const nextUpcomingByKey = new Map<string, boolean>()
+        for (const match of matches) {
+          nextUpcomingByKey.set(getMatchKey(match, details.tournament.code), isMatchUpcoming(match))
+        }
+        matchSnapshotRef.current = {
+          scopeKey,
+          upcomingByKey: nextUpcomingByKey,
+          fetchedAtMs,
+          autoRefreshWasEnabled: autoRefreshRef.current,
         }
 
         const currentTz = sourceTimeZoneRef.current.trim()
@@ -721,6 +804,7 @@ export default function App() {
             onSelectedCountryChange={setSelectedCountry}
             autoRefresh={autoRefresh}
             onEnableAutoRefresh={handleEnableAutoRefresh}
+            actualStartTimes={actualStartTimes}
           />
         ) : null}
         {content?.kind === 'html' && convertedHtml ? <PageView html={convertedHtml} /> : null}
