@@ -40,6 +40,14 @@ export interface BwfTeam {
   linkName: string | null
 }
 
+export interface BwfScoreSet {
+  home?: number | null
+  away?: number | null
+  serve?: number | string | null
+  service?: number | string | null
+  lastPointWinner?: number | string | null
+}
+
 export interface DayMatch {
   id: number
   code: string
@@ -75,7 +83,9 @@ export interface DayMatch {
   matchTypeValue: string
   matchTypeNo: string | null
   reliability: number
-  score: unknown[]
+  serve?: number | string | null
+  service?: number | string | null
+  score: BwfScoreSet[]
   matches: DayMatch[]
 }
 

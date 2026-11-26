@@ -1,4 +1,4 @@
-import type { BwfPlayer, BwfTeam, DayMatch } from './bwf'
+import type { BwfPlayer, BwfScoreSet, BwfTeam, DayMatch } from './bwf'
 import {
   convertTimeText,
   formatDurationMinutes,
@@ -24,8 +24,18 @@ const MAX_ACTUAL_START_TIME_ITEMS = 1000
 const ACTUAL_START_FUTURE_SKEW_MS = 5 * 60 * 1000
 const UNSAFE_OBJECT_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
 const REDUNDANT_OOP_TEXT_PATTERN = /^(?:starting\s+at(?:\b.*)?|followed\s+by\.?)$/i
+const MAIN_LOCATION_PATTERN = /^main\s+location$/i
 
 export type ActualStartTimesMap = Record<string, number>
+export type ServingTeam = 1 | 2
+export type ServingTeamsMap = Record<string, ServingTeam>
+
+export interface MatchScoreSnapshot {
+  setIndex: number
+  home: number
+  away: number
+  servingTeam: ServingTeam | null
+}
 
 const LIVE_STATUS_CODES = new Set(['P', 'C', 'W', 'H'])
 const FINISHED_STATUS_CODES = new Set(['F', 'O'])
@@ -503,6 +513,139 @@ function roundToMinuteMs(ms: number): number {
   return Math.round(ms / 60_000) * 60_000
 }
 
+function parseServingSide(value: number | string | null | undefined): ServingTeam | null {
+  if (value === 1 || value === 2) {
+    return value
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+    if (normalized === '1' || normalized === 'home' || normalized === 'team1') {
+      return 1
+    }
+    if (normalized === '2' || normalized === 'away' || normalized === 'team2') {
+      return 2
+    }
+  }
+  return null
+}
+
+function getExplicitServingTeam(match: DayMatch, sets: readonly BwfScoreSet[]): ServingTeam | null {
+  const activeSet = sets.length > 0 ? sets[sets.length - 1] : null
+  const fromActiveSet =
+    parseServingSide(activeSet?.serve) ??
+    parseServingSide(activeSet?.service) ??
+    parseServingSide(activeSet?.lastPointWinner)
+  if (fromActiveSet !== null) {
+    return fromActiveSet
+  }
+  return parseServingSide(match.serve) ?? parseServingSide(match.service)
+}
+
+/**
+ * Resolves the currently serving team (`1` or `2`) for an in-progress match.
+ * Prefers explicit API fields (`serve`, `service`, `lastPointWinner`), then falls back to
+ * score-delta comparison across refreshes and badminton set-start rules.
+ */
+export function resolveServingTeamForMatch(
+  match: DayMatch,
+  previousSnapshot?: MatchScoreSnapshot,
+): { servingTeam: ServingTeam | null; snapshot: MatchScoreSnapshot | null } {
+  if (!isMatchLive(match) || isMatchFinished(match)) {
+    return { servingTeam: null, snapshot: null }
+  }
+
+  const sets = Array.isArray(match.score) ? match.score : []
+  const explicit = getExplicitServingTeam(match, sets)
+
+  if (sets.length === 0) {
+    return {
+      servingTeam: explicit,
+      snapshot: explicit ? { setIndex: -1, home: 0, away: 0, servingTeam: explicit } : null,
+    }
+  }
+
+  const setIndex = sets.length - 1
+  const activeSet = sets[setIndex]
+  const home = Number(activeSet?.home ?? 0)
+  const away = Number(activeSet?.away ?? 0)
+
+  let servingTeam: ServingTeam | null = explicit
+
+  if (servingTeam === null) {
+    let homeSetsWon = 0
+    let awaySetsWon = 0
+    for (let i = 0; i < sets.length; i += 1) {
+      const h = Number(sets[i]?.home ?? 0)
+      const a = Number(sets[i]?.away ?? 0)
+      if (i < setIndex || isBadmintonSetComplete(h, a)) {
+        if (h > a) {
+          homeSetsWon += 1
+        } else if (a > h) {
+          awaySetsWon += 1
+        }
+      }
+    }
+
+    if (isBadmintonSetComplete(home, away)) {
+      if (homeSetsWon < 2 && awaySetsWon < 2 && home !== away) {
+        servingTeam = home > away ? 1 : 2
+      }
+    } else if (previousSnapshot && previousSnapshot.setIndex === setIndex) {
+      const deltaHome = home - previousSnapshot.home
+      const deltaAway = away - previousSnapshot.away
+      if (deltaHome > 0 && deltaAway === 0) {
+        servingTeam = 1
+      } else if (deltaAway > 0 && deltaHome === 0) {
+        servingTeam = 2
+      } else if (deltaHome === 0 && deltaAway === 0) {
+        servingTeam = previousSnapshot.servingTeam
+      }
+    } else if (home > 0 && away === 0) {
+      servingTeam = 1
+    } else if (away > 0 && home === 0) {
+      servingTeam = 2
+    } else if (home === 0 && away === 0 && setIndex > 0) {
+      const prevSet = sets[setIndex - 1]
+      const prevHome = Number(prevSet?.home ?? 0)
+      const prevAway = Number(prevSet?.away ?? 0)
+      if (prevHome !== prevAway) {
+        servingTeam = prevHome > prevAway ? 1 : 2
+      }
+    }
+  }
+
+  return {
+    servingTeam,
+    snapshot: { setIndex, home, away, servingTeam },
+  }
+}
+
+/**
+ * Evaluates serving indicators for all live matches in a schedule fetch, updating the
+ * per-match score snapshot map so indicators remain accurate and persistent across refreshes.
+ */
+export function resolveServingTeamsForMatches(
+  matches: readonly DayMatch[],
+  tournamentCode: string,
+  previousSnapshots: ReadonlyMap<string, MatchScoreSnapshot>,
+): { servingTeams: ServingTeamsMap; snapshots: Map<string, MatchScoreSnapshot> } {
+  const servingTeams: ServingTeamsMap = {}
+  const snapshots = new Map<string, MatchScoreSnapshot>()
+
+  for (const match of matches) {
+    const matchKey = getMatchKey(match, tournamentCode)
+    const { servingTeam, snapshot } = resolveServingTeamForMatch(match, previousSnapshots.get(matchKey))
+    if (servingTeam !== null) {
+      servingTeams[matchKey] = servingTeam
+    }
+    if (snapshot !== null) {
+      snapshots.set(matchKey, snapshot)
+    }
+  }
+
+  return { servingTeams, snapshots }
+}
+
 function adjustCourtTimesForLiveMatch(courtList: MatchTimeView[], localTz: string, nowMs: number): void {
   let liveIdx = -1
   for (let i = courtList.length - 1; i >= 0; i -= 1) {
@@ -512,30 +655,60 @@ function adjustCourtTimesForLiveMatch(courtList: MatchTimeView[], localTz: strin
     }
   }
 
-  if (liveIdx === -1) {
-    return
-  }
-
-  const liveView = courtList[liveIdx]
-  const liveReferenceMs = liveView.actualStartInstant?.getTime() ?? liveView.localInstant.getTime()
-  const isWithinLiveWindow = Math.abs(nowMs - liveReferenceMs) <= 12 * 60 * 60 * 1000
-  const inferredElapsedMin =
-    (liveView.actualStartInstant !== null || liveView.isCalculatedStartTime) && isWithinLiveWindow
-      ? Math.max(0, Math.round((nowMs - liveReferenceMs) / 60_000))
-      : 0
-  const remainingMin = estimateRemainingMatchMinutes(liveView.match, inferredElapsedMin)
-  liveView.liveRemainingMinutes = remainingMin
-
-  const apiElapsedMin =
-    typeof liveView.match.duration === 'number' && liveView.match.duration > 0 ? liveView.match.duration : 0
-  const elapsedMin = apiElapsedMin > 0 ? apiElapsedMin : inferredElapsedMin
-  const liveNowMs = isWithinLiveWindow ? nowMs : liveReferenceMs + elapsedMin * 60_000
-  const estimatedLiveEndMs = liveNowMs + remainingMin * 60_000
-
-  let cursorStartMs = roundToMinuteMs(estimatedLiveEndMs + MATCH_CHANGEOVER_MIN * 60_000)
+  let startAfterIdx = liveIdx
+  let cursorStartMs = 0
   let lastPlacedIdx = -1
 
-  for (let i = liveIdx + 1; i < courtList.length; i += 1) {
+  if (liveIdx !== -1) {
+    const liveView = courtList[liveIdx]
+    const liveReferenceMs = liveView.actualStartInstant?.getTime() ?? liveView.localInstant.getTime()
+    const isWithinLiveWindow = Math.abs(nowMs - liveReferenceMs) <= 12 * 60 * 60 * 1000
+    const inferredElapsedMin =
+      (liveView.actualStartInstant !== null || liveView.isCalculatedStartTime) && isWithinLiveWindow
+        ? Math.max(0, Math.round((nowMs - liveReferenceMs) / 60_000))
+        : 0
+    const remainingMin = estimateRemainingMatchMinutes(liveView.match, inferredElapsedMin)
+    liveView.liveRemainingMinutes = remainingMin
+
+    const apiElapsedMin =
+      typeof liveView.match.duration === 'number' && liveView.match.duration > 0 ? liveView.match.duration : 0
+    const elapsedMin = apiElapsedMin > 0 ? apiElapsedMin : inferredElapsedMin
+    const liveNowMs = isWithinLiveWindow ? nowMs : liveReferenceMs + elapsedMin * 60_000
+    const estimatedLiveEndMs = liveNowMs + remainingMin * 60_000
+
+    cursorStartMs = roundToMinuteMs(estimatedLiveEndMs + MATCH_CHANGEOVER_MIN * 60_000)
+  } else {
+    let calculatedUpcomingIdx = -1
+    for (let i = courtList.length - 1; i >= 0; i -= 1) {
+      const candidate = courtList[i]
+      if (candidate.isCalculatedStartTime && isMatchUpcoming(candidate.match)) {
+        calculatedUpcomingIdx = i
+        break
+      }
+    }
+    if (calculatedUpcomingIdx === -1) {
+      return
+    }
+    const anchorView = courtList[calculatedUpcomingIdx]
+    const anchorMs = anchorView.localInstant.getTime()
+    const isWithinLiveWindow = Math.abs(nowMs - anchorMs) <= 12 * 60 * 60 * 1000
+    const effectiveAnchorMs = isWithinLiveWindow ? Math.max(anchorMs, roundToMinuteMs(nowMs)) : anchorMs
+    if (effectiveAnchorMs !== anchorMs) {
+      const updatedInstant = new Date(effectiveAnchorMs)
+      const deltaMin = Math.round((effectiveAnchorMs - anchorView.scheduledInstant.getTime()) / 60_000)
+      anchorView.sourceInstant = updatedInstant
+      anchorView.localInstant = updatedInstant
+      anchorView.timeLabel = formatTimeOfDay(updatedInstant, localTz)
+      anchorView.dateLabel = formatLongDate(updatedInstant, localTz)
+      anchorView.isTimeAdjusted = deltaMin !== 0
+      anchorView.adjustmentDeltaMinutes = deltaMin
+    }
+    startAfterIdx = calculatedUpcomingIdx
+    cursorStartMs = effectiveAnchorMs
+    lastPlacedIdx = calculatedUpcomingIdx
+  }
+
+  for (let i = startAfterIdx + 1; i < courtList.length; i += 1) {
     const current = courtList[i]
     if (
       isMatchFinished(current.match) ||
@@ -711,6 +884,15 @@ export function buildOrderedScheduleViews(
   return orderedViews
 }
 
+function resolveCourtLocation(locationName: string | null | undefined, fallbackVenue: string): string {
+  const trimmedLocation = (locationName ?? '').trim()
+  if (trimmedLocation) {
+    return MAIN_LOCATION_PATTERN.test(trimmedLocation) ? '' : trimmedLocation
+  }
+  const trimmedFallback = fallbackVenue.trim()
+  return trimmedFallback && !MAIN_LOCATION_PATTERN.test(trimmedFallback) ? trimmedFallback : ''
+}
+
 export function groupViewsByCourt(views: MatchTimeView[], fallbackVenue: string): CourtBlock[] {
   const ordered: CourtBlock[] = []
   const courtIndex = new Map<string, number>()
@@ -725,7 +907,7 @@ export function groupViewsByCourt(views: MatchTimeView[], fallbackVenue: string)
       ordered.push({
         id: toCourtId(name, usedIds),
         name,
-        location: view.match.locationName || fallbackVenue || '',
+        location: resolveCourtLocation(view.match.locationName, fallbackVenue),
         matches: [],
         liveCount: 0,
       })

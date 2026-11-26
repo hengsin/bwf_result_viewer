@@ -17,11 +17,18 @@ import {
   matchHasCountry,
   playerDisplayName,
   playNotificationChime,
+  resolveServingTeamForMatch,
   saveAlertSoundEnabled,
   savePinnedMatchKeys,
   toSafeFlagUrl,
 } from '../lib/schedule'
-import type { ActualStartTimesMap, MatchStartNotification, MatchTimeView } from '../lib/schedule'
+import type {
+  ActualStartTimesMap,
+  MatchStartNotification,
+  MatchTimeView,
+  ServingTeam,
+  ServingTeamsMap,
+} from '../lib/schedule'
 import { CountryFlag } from './CountryFlag'
 import { CourtSidebar } from './CourtSidebar'
 import type { CourtSummary, PinnedSidebarItem } from './CourtSidebar'
@@ -100,12 +107,44 @@ interface TeamDisplayProps {
   team: BwfTeam
   seed: string | null
   isWinner: boolean
+  isServing: boolean
   hovercardId: string
   activeTriggerKey: string | null
   onTriggerIntent: (target: HoveredPlayerTarget, el: HTMLAnchorElement) => void
   onTriggerLeave: (triggerKey: string) => void
   onTriggerFocus: (target: HoveredPlayerTarget, el: HTMLAnchorElement) => void
   onTriggerBlur: (triggerKey: string) => void
+}
+
+function ServingIndicator() {
+  return (
+    <span className="serving-indicator" title="Currently serving">
+      <svg
+        className="serving-indicator-icon"
+        viewBox="0 0 16 16"
+        width="13"
+        height="13"
+        aria-hidden="true"
+        fill="none"
+      >
+        <path
+          d="M8 13.5c-1.5 0-2.6-1-2.6-2.3 0-.5.2-1 .5-1.4h4.2c.3.4.5.9.5 1.4 0 1.3-1.1 2.3-2.6 2.3Z"
+          fill="currentColor"
+        />
+        <path
+          d="M5.8 9.2 3.1 3.5l3.1 1L8 2.5l1.8 2 3.1-1-2.7 5.7"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+      <span className="serving-indicator-text" aria-hidden="true">
+        Srv
+      </span>
+      <span className="visually-hidden"> (Serving)</span>
+    </span>
+  )
 }
 
 function TeamDisplay({
@@ -115,6 +154,7 @@ function TeamDisplay({
   team,
   seed,
   isWinner,
+  isServing,
   hovercardId,
   activeTriggerKey,
   onTriggerIntent,
@@ -135,10 +175,11 @@ function TeamDisplay({
       .filter(Boolean),
   )
   const hasMixedCountries = players.length > 1 && countryKeys.size > 1
+  const teamClassName = `match-team${isWinner ? ' winner' : ''}${isServing ? ' is-serving' : ''}`
 
   if (hasMixedCountries) {
     return (
-      <span className={`match-team${isWinner ? ' winner' : ''}`}>
+      <span className={teamClassName}>
         {players.map(({ player, name }, index) => {
           const partner = players.length === 2 ? players[index === 0 ? 1 : 0].player : null
           const target = buildPlayerTarget(matchKey, teamIndex, index, player, partner, eventName)
@@ -168,6 +209,7 @@ function TeamDisplay({
           )
         })}
         {seed ? <span className="match-seed">({seed})</span> : null}
+        {isServing ? <ServingIndicator /> : null}
       </span>
     )
   }
@@ -183,16 +225,17 @@ function TeamDisplay({
 
   if (players.length === 0) {
     return (
-      <span className={`match-team${isWinner ? ' winner' : ''}`}>
+      <span className={teamClassName}>
         <CountryFlag flagUrl={sharedFlagUrl} countryCode={sharedCountryCode} countryName={sharedCountryName} />
         <span className="match-team-name">{team.teamName?.trim() || 'TBD'}</span>
         {seed ? <span className="match-seed">({seed})</span> : null}
+        {isServing ? <ServingIndicator /> : null}
       </span>
     )
   }
 
   return (
-    <span className={`match-team${isWinner ? ' winner' : ''}`}>
+    <span className={teamClassName}>
       <CountryFlag flagUrl={sharedFlagUrl} countryCode={sharedCountryCode} countryName={sharedCountryName} />
       {players.map(({ player, name }, index) => {
         const partner = players.length === 2 ? players[index === 0 ? 1 : 0].player : null
@@ -218,6 +261,7 @@ function TeamDisplay({
         )
       })}
       {seed ? <span className="match-seed">({seed})</span> : null}
+      {isServing ? <ServingIndicator /> : null}
     </span>
   )
 }
@@ -241,8 +285,8 @@ function PinIcon({ filled }: { filled: boolean }) {
   )
 }
 
-function renderScore(match: DayMatch, view: MatchTimeView): ReactNode {
-  const score = (match.score ?? []) as Array<{ home?: number; away?: number; serve?: number; lastPointWinner?: number }>
+function renderScore(match: DayMatch, view: MatchTimeView, servingTeam: ServingTeam | null): ReactNode {
+  const score = match.score ?? []
   const hasScore = score.length > 0
   const hasDuration = view.durationLabel !== null && view.durationIso !== null
   if (!hasScore && !hasDuration) {
@@ -257,11 +301,16 @@ function renderScore(match: DayMatch, view: MatchTimeView): ReactNode {
         const awayPoints = set.away ?? 0
         const homeWon = (match.winner === 1 || (!live && homePoints > awayPoints)) && homePoints > awayPoints
         const awayWon = (match.winner === 2 || (!live && awayPoints > homePoints)) && awayPoints > homePoints
+        const isActiveSet = live && !isMatchFinished(match) && index === score.length - 1
+        const homeServing = isActiveSet && servingTeam === 1
+        const awayServing = isActiveSet && servingTeam === 2
         return (
-          <span key={index} className="match-set">
-            <span className={homeWon ? 'set-won' : undefined}>{homePoints}</span>
+          <span key={index} className={`match-set${isActiveSet ? ' is-active-set' : ''}`}>
+            {homeServing ? <span className="set-serve-dot" aria-hidden="true" title="Team 1 serving" /> : null}
+            <span className={homeWon ? 'set-won' : homeServing ? 'set-serving' : undefined}>{homePoints}</span>
             <span className="match-set-separator">-</span>
-            <span className={awayWon ? 'set-won' : undefined}>{awayPoints}</span>
+            <span className={awayWon ? 'set-won' : awayServing ? 'set-serving' : undefined}>{awayPoints}</span>
+            {awayServing ? <span className="set-serve-dot" aria-hidden="true" title="Team 2 serving" /> : null}
           </span>
         )
       })}
@@ -347,6 +396,8 @@ interface ScheduleViewProps {
   secondsUntilRefresh: number | null
   onEnableAutoRefresh: () => void
   actualStartTimes: Readonly<ActualStartTimesMap>
+  servingTeams?: Readonly<ServingTeamsMap>
+  fetchedAtMs?: number
 }
 
 export function ScheduleView({
@@ -369,6 +420,8 @@ export function ScheduleView({
   secondsUntilRefresh,
   onEnableAutoRefresh,
   actualStartTimes,
+  servingTeams = {},
+  fetchedAtMs = 0,
 }: ScheduleViewProps) {
   const localTz = getBrowserTimeZone()
   const scheduleScopeKey = `${tournamentCode}:${contextDate}`
@@ -380,6 +433,7 @@ export function ScheduleView({
   )
   const [toasts, setToasts] = useState<MatchStartNotification[]>([])
   const [nowMs, setNowMs] = useState<number>(() => Date.now())
+  const [recalcTick, setRecalcTick] = useState(0)
 
   const pinnedKeys = useMemo(() => new Set(pinnedKeyList), [pinnedKeyList])
   const pendingJumpAnchorRef = useRef<string | null>(null)
@@ -388,19 +442,33 @@ export function ScheduleView({
   const previousStatusByKeyRef = useRef<Map<string, string>>(new Map())
   const lastScopeKeyRef = useRef<string>(scheduleScopeKey)
 
-  const allViews = useMemo(
-    () =>
-      buildOrderedScheduleViews(
-        matches,
-        sourceTimeZone,
-        contextDate,
-        localTz,
-        tournamentCode,
-        nowMs,
-        actualStartTimes,
-      ),
-    [matches, sourceTimeZone, contextDate, localTz, tournamentCode, nowMs, actualStartTimes],
-  )
+  const effectiveNowMs = Math.max(nowMs, fetchedAtMs)
+
+  const allViews = useMemo(() => {
+    void recalcTick
+    void onlyInProgress
+    void selectedCountry
+    return buildOrderedScheduleViews(
+      matches,
+      sourceTimeZone,
+      contextDate,
+      localTz,
+      tournamentCode,
+      effectiveNowMs,
+      actualStartTimes,
+    )
+  }, [
+    matches,
+    sourceTimeZone,
+    contextDate,
+    localTz,
+    tournamentCode,
+    effectiveNowMs,
+    actualStartTimes,
+    recalcTick,
+    onlyInProgress,
+    selectedCountry,
+  ])
 
   const countries = useMemo(() => buildCountryOptions(matches), [matches])
 
@@ -453,12 +521,12 @@ export function ScheduleView({
         anchorId: view.anchorId,
         courtName: view.courtName,
         summary: view.summary,
-        hint: getPinnedMatchHint(view, nowMs),
+        hint: getPinnedMatchHint(view, effectiveNowMs),
         isVisible: visibleMatchKeySet.has(view.matchKey),
       })
     }
     return items
-  }, [allViews, pinnedKeys, nowMs, visibleMatchKeySet])
+  }, [allViews, pinnedKeys, effectiveNowMs, visibleMatchKeySet])
 
   const hasPinnedInCurrentSchedule = pinnedSidebarItems.length > 0
   const shouldTickClock = hasPinnedInCurrentSchedule || hasLiveMatches
@@ -798,7 +866,7 @@ export function ScheduleView({
       notifiedKeys: notifiedKeysRef.current,
       previousFinishedByKey: previousFinishedByKeyRef.current,
       previousStatusByKey: previousStatusByKeyRef.current,
-      nowMs,
+      nowMs: effectiveNowMs,
     })
 
     if (incoming.length > 0) {
@@ -813,7 +881,7 @@ export function ScheduleView({
     }
     previousFinishedByKeyRef.current = nextFinished
     previousStatusByKeyRef.current = nextStatus
-  }, [allViews, pinnedKeys, nowMs, scheduleScopeKey, dispatchStartNotifications])
+  }, [allViews, pinnedKeys, effectiveNowMs, scheduleScopeKey, dispatchStartNotifications])
 
   const handleRequestNotificationPermission = useCallback(() => {
     if (typeof window === 'undefined' || !('Notification' in window)) {
@@ -856,7 +924,27 @@ export function ScheduleView({
     setToasts([])
   }, [])
 
+  const handleOnlyInProgressChange = useCallback(
+    (next: boolean) => {
+      setNowMs(Date.now())
+      setRecalcTick((tick) => tick + 1)
+      onOnlyInProgressChange(next)
+    },
+    [onOnlyInProgressChange],
+  )
+
+  const handleSelectedCountryChange = useCallback(
+    (countryCode: string) => {
+      setNowMs(Date.now())
+      setRecalcTick((tick) => tick + 1)
+      onSelectedCountryChange(countryCode)
+    },
+    [onSelectedCountryChange],
+  )
+
   const handleResetFilters = useCallback(() => {
+    setNowMs(Date.now())
+    setRecalcTick((tick) => tick + 1)
     onOnlyInProgressChange(false)
     onSelectedCountryChange('')
   }, [onOnlyInProgressChange, onSelectedCountryChange])
@@ -1099,7 +1187,7 @@ export function ScheduleView({
       ? visibleViews[0].dateLabel
       : allViews.length > 0
         ? allViews[0].dateLabel
-        : formatLongDate(new Date(nowMs), localTz)
+        : formatLongDate(new Date(effectiveNowMs), localTz)
 
   const emptyMessage = useMemo(() => {
     if (allViews.length === 0) {
@@ -1128,10 +1216,10 @@ export function ScheduleView({
         navRef={navRef}
         onSelectCourt={handleSelectCourt}
         onlyInProgress={onlyInProgress}
-        onOnlyInProgressChange={onOnlyInProgressChange}
+        onOnlyInProgressChange={handleOnlyInProgressChange}
         countries={countries}
         selectedCountry={selectedCountry}
-        onSelectedCountryChange={onSelectedCountryChange}
+        onSelectedCountryChange={handleSelectedCountryChange}
         pinnedMatches={pinnedSidebarItems}
         onUnpinMatch={handleTogglePin}
         onJumpToMatch={handleJumpToMatch}
@@ -1197,7 +1285,7 @@ export function ScheduleView({
         ) : (
           courts.map((court) => (
             <section
-              className="court-block"
+              className={`court-block${court.liveCount > 0 ? ' has-live' : ''}`}
               key={court.id}
               id={court.id}
               tabIndex={-1}
@@ -1214,17 +1302,28 @@ export function ScheduleView({
                   {court.name}
                   {court.location ? <span className="court-location"> — {court.location}</span> : null}
                 </h3>
-                <span className="court-heading-meta">
-                  {court.liveCount > 0 ? `${court.liveCount} live · ` : ''}
-                  {court.matches.length} {court.matches.length === 1 ? 'match' : 'matches'}
-                </span>
+                <div className="court-heading-meta">
+                  {court.liveCount > 0 ? (
+                    <span className="court-heading-live">
+                      <span className="court-live-dot" aria-hidden="true" />
+                      {court.liveCount} live
+                    </span>
+                  ) : null}
+                  <span className="court-heading-count">
+                    {court.matches.length} {court.matches.length === 1 ? 'match' : 'matches'}
+                  </span>
+                </div>
               </div>
 
               <div className="match-list">
                 {court.matches.map((view) => {
                   const { match } = view
                   const isPinned = pinnedKeys.has(view.matchKey)
-                  const pinHint = isPinned ? getPinnedMatchHint(view, nowMs) : null
+                  const pinHint = isPinned ? getPinnedMatchHint(view, effectiveNowMs) : null
+                  const isLive = view.statusTone === 'live'
+                  const servingTeam: ServingTeam | null = isLive
+                    ? (servingTeams[view.matchKey] ?? resolveServingTeamForMatch(match).servingTeam)
+                    : null
                   return (
                     <article
                       id={view.anchorId}
@@ -1233,6 +1332,12 @@ export function ScheduleView({
                       key={view.matchKey}
                     >
                       <div className="match-time">
+                        {isLive ? (
+                          <span className="match-live-kicker" aria-hidden="true">
+                            <span className="status-live-dot" />
+                            LIVE
+                          </span>
+                        ) : null}
                         <span className="match-time-value">{view.timeLabel}</span>
                         {view.isActualStartTime ? (
                           <span
@@ -1296,6 +1401,7 @@ export function ScheduleView({
                             team={match.team1}
                             seed={match.team1seed}
                             isWinner={match.winner === 1}
+                            isServing={servingTeam === 1}
                             hovercardId={hovercardId}
                             activeTriggerKey={hoveredTarget?.triggerKey ?? null}
                             onTriggerIntent={handleTriggerIntent}
@@ -1311,6 +1417,7 @@ export function ScheduleView({
                             team={match.team2}
                             seed={match.team2seed}
                             isWinner={match.winner === 2}
+                            isServing={servingTeam === 2}
                             hovercardId={hovercardId}
                             activeTriggerKey={hoveredTarget?.triggerKey ?? null}
                             onTriggerIntent={handleTriggerIntent}
@@ -1320,7 +1427,7 @@ export function ScheduleView({
                           />
                         </div>
 
-                        {renderScore(match, view)}
+                        {renderScore(match, view, servingTeam)}
                         {view.oopLabel ? <div className="match-schedule">{view.oopLabel}</div> : null}
                       </div>
 

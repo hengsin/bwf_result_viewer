@@ -30,9 +30,12 @@ import {
   getMatchKey,
   isMatchUpcoming,
   loadActualStartTimes,
+  resolveServingTeamsForMatches,
   saveActualStartTimes,
   subscribeActualStartTimesStorage,
   type ActualStartTimesMap,
+  type MatchScoreSnapshot,
+  type ServingTeamsMap,
 } from './lib/schedule'
 import { CurrentMonthTournaments } from './components/CurrentMonthTournaments'
 import { ScheduleView } from './components/ScheduleView'
@@ -66,6 +69,7 @@ interface ContentState {
   tournament: BwfTournament | null
   sourceTimeZone: string
   contextDate: string
+  fetchedAtMs: number
 }
 
 export default function App() {
@@ -92,6 +96,7 @@ export default function App() {
   const [themePreference, setThemePreference] = useState<ThemePreference>(() => loadThemePreference())
   const [systemTheme, setSystemTheme] = useState<ResolvedTheme>(() => getSystemTheme())
   const [actualStartTimes, setActualStartTimes] = useState<ActualStartTimesMap>(() => loadActualStartTimes())
+  const [servingTeams, setServingTeams] = useState<ServingTeamsMap>({})
   const [calendarTournaments, setCalendarTournaments] = useState<CalendarTournament[]>([])
   const [calendarLoading, setCalendarLoading] = useState(true)
   const [calendarError, setCalendarError] = useState<string | null>(null)
@@ -109,6 +114,10 @@ export default function App() {
     upcomingByKey: Map<string, boolean>
     fetchedAtMs: number
     autoRefreshWasEnabled: boolean
+  } | null>(null)
+  const scoreSnapshotRef = useRef<{
+    scopeKey: string
+    snapshots: Map<string, MatchScoreSnapshot>
   } | null>(null)
   const loadIdRef = useRef(0)
   const selectTournamentSeqRef = useRef(0)
@@ -302,6 +311,21 @@ export default function App() {
           autoRefreshWasEnabled: autoRefreshRef.current,
         }
 
+        const previousScoreSnapshots =
+          scoreSnapshotRef.current && scoreSnapshotRef.current.scopeKey === scopeKey
+            ? scoreSnapshotRef.current.snapshots
+            : new Map<string, MatchScoreSnapshot>()
+        const { servingTeams: nextServingTeams, snapshots: nextScoreSnapshots } = resolveServingTeamsForMatches(
+          matches,
+          details.tournament.code,
+          previousScoreSnapshots,
+        )
+        scoreSnapshotRef.current = {
+          scopeKey,
+          snapshots: nextScoreSnapshots,
+        }
+        setServingTeams(nextServingTeams)
+
         const currentTz = sourceTimeZoneRef.current.trim()
         let resolvedTimeZone = isValidTimeZone(currentTz) ? currentTz : DEFAULT_SOURCE_TIME_ZONE
         if (!manualTimeZoneOverrideRef.current) {
@@ -331,6 +355,7 @@ export default function App() {
           tournament: details.tournament,
           sourceTimeZone: resolvedTimeZone,
           contextDate,
+          fetchedAtMs,
         })
       } else {
         const { rawHtml, contextDate, pageTitle } = await fetchRawPageHtml(withProtocol)
@@ -347,6 +372,7 @@ export default function App() {
           tournament: null,
           sourceTimeZone: resolvedTimeZone,
           contextDate,
+          fetchedAtMs: Date.now(),
         })
       }
     } catch (e) {
@@ -770,6 +796,8 @@ export default function App() {
             secondsUntilRefresh={secondsUntilRefresh}
             onEnableAutoRefresh={handleEnableAutoRefresh}
             actualStartTimes={actualStartTimes}
+            servingTeams={servingTeams}
+            fetchedAtMs={content.fetchedAtMs}
           />
         ) : null}
         {content?.kind === 'html' && convertedHtml ? <PageView html={convertedHtml} /> : null}
