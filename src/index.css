@@ -50,10 +50,13 @@
   --btn-hover-text-light: #ffffff;
   --live-light: #0a6e43;
   --live-hover-light: #075332;
+  --live-accent-light: #0a6e43;
   --live-bg-light: rgba(10, 110, 67, 0.09);
   --live-border-light: rgba(10, 110, 67, 0.38);
   --live-badge-bg-light: #0a6e43;
+  --live-badge-border-light: #0a6e43;
   --live-badge-text-light: #ffffff;
+  --live-badge-shadow-light: rgba(10, 110, 67, 0.48);
   --live-row-tint-light: rgba(10, 110, 67, 0.085);
   --live-row-edge-light: rgba(10, 110, 67, 0.16);
   --live-filter-bg-light: rgba(10, 110, 67, 0.075);
@@ -120,17 +123,20 @@
   --btn-hover-dark: #f03854;
   --btn-text-dark: #0c100e;
   --btn-hover-text-dark: #ffffff;
-  --live-dark: #34d399;
-  --live-hover-dark: #6ee7b7;
-  --live-bg-dark: rgba(52, 211, 153, 0.12);
-  --live-border-dark: rgba(52, 211, 153, 0.42);
-  --live-badge-bg-dark: #34d399;
-  --live-badge-text-dark: #052016;
-  --live-row-tint-dark: rgba(52, 211, 153, 0.095);
-  --live-row-edge-dark: rgba(52, 211, 153, 0.18);
-  --live-filter-bg-dark: rgba(52, 211, 153, 0.09);
-  --live-pulse-start-dark: rgba(52, 211, 153, 0.62);
-  --live-pulse-end-dark: rgba(52, 211, 153, 0);
+  --live-dark: #45b68a;
+  --live-hover-dark: #68cda5;
+  --live-accent-dark: #2a8a65;
+  --live-bg-dark: rgba(69, 182, 138, 0.11);
+  --live-border-dark: rgba(69, 182, 138, 0.26);
+  --live-badge-bg-dark: #165941;
+  --live-badge-border-dark: rgba(69, 182, 138, 0.44);
+  --live-badge-text-dark: #e4faf0;
+  --live-badge-shadow-dark: rgba(0, 0, 0, 0.42);
+  --live-row-tint-dark: rgba(69, 182, 138, 0.055);
+  --live-row-edge-dark: rgba(69, 182, 138, 0.115);
+  --live-filter-bg-dark: rgba(69, 182, 138, 0.075);
+  --live-pulse-start-dark: rgba(69, 182, 138, 0.42);
+  --live-pulse-end-dark: rgba(69, 182, 138, 0);
   --scheduled-bg-dark: #1a211e;
   --scheduled-border-dark: #2d3833;
   --scheduled-text-dark: #9aa8a1;
@@ -194,10 +200,13 @@
   --btn-hover-text: var(--btn-hover-text-light);
   --live: var(--live-light);
   --live-hover: var(--live-hover-light);
+  --live-accent: var(--live-accent-light);
   --live-bg: var(--live-bg-light);
   --live-border: var(--live-border-light);
   --live-badge-bg: var(--live-badge-bg-light);
+  --live-badge-border: var(--live-badge-border-light);
   --live-badge-text: var(--live-badge-text-light);
+  --live-badge-shadow: var(--live-badge-shadow-light);
   --live-row-tint: var(--live-row-tint-light);
   --live-row-edge: var(--live-row-edge-light);
   --live-filter-bg: var(--live-filter-bg-light);
@@ -282,10 +291,13 @@
     --btn-hover-text: var(--btn-hover-text-dark);
     --live: var(--live-dark);
     --live-hover: var(--live-hover-dark);
+    --live-accent: var(--live-accent-dark);
     --live-bg: var(--live-bg-dark);
     --live-border: var(--live-border-dark);
     --live-badge-bg: var(--live-badge-bg-dark);
+    --live-badge-border: var(--live-badge-border-dark);
     --live-badge-text: var(--live-badge-text-dark);
+    --live-badge-shadow: var(--live-badge-shadow-dark);
     --live-row-tint: var(--live-row-tint-dark);
     --live-row-edge: var(--live-row-edge-dark);
     --live-filter-bg: var(--live-filter-bg-dark);
@@ -357,10 +369,13 @@
     --btn-hover-text: var(--btn-hover-text-dark);
     --live: var(--live-dark);
     --live-hover: var(--live-hover-dark);
+    --live-accent: var(--live-accent-dark);
     --live-bg: var(--live-bg-dark);
     --live-border: var(--live-border-dark);
     --live-badge-bg: var(--live-badge-bg-dark);
+    --live-badge-border: var(--live-badge-border-dark);
     --live-badge-text: var(--live-badge-text-dark);
+    --live-badge-shadow: var(--live-badge-shadow-dark);
     --live-row-tint: var(--live-row-tint-dark);
     --live-row-edge: var(--live-row-edge-dark);
     --live-filter-bg: var(--live-filter-bg-dark);
@@ -430,10 +445,13 @@
     --btn-hover-text: var(--btn-hover-text-light);
     --live: var(--live-light);
     --live-hover: var(--live-hover-light);
+    --live-accent: var(--live-accent-light);
     --live-bg: var(--live-bg-light);
     --live-border: var(--live-border-light);
     --live-badge-bg: var(--live-badge-bg-light);
+    --live-badge-border: var(--live-badge-border-light);
     --live-badge-text: var(--live-badge-text-light);
+    --live-badge-shadow: var(--live-badge-shadow-light);
     --live-row-tint: var(--live-row-tint-light);
     --live-row-edge: var(--live-row-edge-light);
     --live-filter-bg: var(--live-filter-bg-light);
@@ -505,10 +523,13 @@
     --btn-hover-text: light-dark(var(--btn-hover-text-light), var(--btn-hover-text-dark));
     --live: light-dark(var(--live-light), var(--live-dark));
     --live-hover: light-dark(var(--live-hover-light), var(--live-hover-dark));
+    --live-accent: light-dark(var(--live-accent-light), var(--live-accent-dark));
     --live-bg: light-dark(var(--live-bg-light), var(--live-bg-dark));
     --live-border: light-dark(var(--live-border-light), var(--live-border-dark));
     --live-badge-bg: light-dark(var(--live-badge-bg-light), var(--live-badge-bg-dark));
+    --live-badge-border: light-dark(var(--live-badge-border-light), var(--live-badge-border-dark));
     --live-badge-text: light-dark(var(--live-badge-text-light), var(--live-badge-text-dark));
+    --live-badge-shadow: light-dark(var(--live-badge-shadow-light), var(--live-badge-shadow-dark));
     --live-row-tint: light-dark(var(--live-row-tint-light), var(--live-row-tint-dark));
     --live-row-edge: light-dark(var(--live-row-edge-light), var(--live-row-edge-dark));
     --live-filter-bg: light-dark(var(--live-filter-bg-light), var(--live-filter-bg-dark));
@@ -2188,7 +2209,7 @@ progress.loading-spinner.is-sm:indeterminate {
 }
 
 .court-block.has-live {
-  border-top-color: var(--live);
+  border-top-color: var(--live-accent);
 }
 
 .court-block:focus {
@@ -2240,7 +2261,7 @@ progress.loading-spinner.is-sm:indeterminate {
 }
 
 .court-block.has-live .court-name::before {
-  background: var(--live);
+  background: var(--live-accent);
 }
 
 .court-location {
@@ -2328,7 +2349,7 @@ progress.loading-spinner.is-sm:indeterminate {
 .match-row.status-live,
 .match-row.status-live.is-pinned {
   border-inline-start-width: 5px;
-  border-inline-start-color: var(--live);
+  border-inline-start-color: var(--live-accent);
   padding-inline-start: 16px;
   background:
     linear-gradient(90deg var(--in-oklab), var(--live-row-edge) 0%, var(--live-row-tint) 34%, var(--live-row-tint) 100%),
@@ -2691,7 +2712,7 @@ progress.loading-spinner.is-sm:indeterminate {
 }
 
 .match-score.is-live .match-set.is-active-set {
-  border-color: var(--live);
+  border-color: var(--live-accent);
   font-weight: 700;
   box-shadow: 0 1px 4px -1px var(--shadow-ambient);
 }
@@ -2742,11 +2763,11 @@ progress.loading-spinner.is-sm:indeterminate {
 
 .match-status.tone-live {
   background: var(--live-badge-bg);
-  border-color: var(--live-badge-bg);
+  border-color: var(--live-badge-border);
   color: var(--live-badge-text);
   font-weight: 700;
   padding: 4px 11px;
-  box-shadow: 0 2px 8px -2px var(--live-pulse-start);
+  box-shadow: 0 2px 8px -2px var(--live-badge-shadow);
 }
 
 .match-status.tone-live .status-live-dot {
