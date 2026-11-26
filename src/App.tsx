@@ -46,7 +46,7 @@ declare global {
   }
 }
 
-const APP_TITLE = 'BWF Local Time'
+const APP_TITLE = 'BWF Match Schedule'
 const DEFAULT_SOURCE_TIME_ZONE = 'Europe/Berlin'
 const DEFAULT_AUTO_REFRESH_INTERVAL_SEC = 60
 
@@ -374,7 +374,7 @@ export default function App() {
     setUrlAnnouncement('')
     announceTimerRef.current = window.setTimeout(() => {
       announceTimerRef.current = null
-      setUrlAnnouncement(`Results page URL: Error: ${message}`)
+      setUrlAnnouncement(`Match schedule page URL: Error: ${message}`)
     }, 500)
   }, [])
 
@@ -608,9 +608,9 @@ export default function App() {
               </svg>
             </span>
             <div className="app-header-copy">
-              <h1>BWF Local Time</h1>
+              <h1>BWF Match Schedule</h1>
               <p className="app-subtitle">
-                Fetch a BWF tournament results page and re-render the times in your local timezone ({browserTimeZoneLabel()}).
+                Fetch a BWF tournament match schedule page and re-render the times in your local timezone ({browserTimeZoneLabel()}).
               </p>
             </div>
           </div>
@@ -624,7 +624,7 @@ export default function App() {
         <form className="control-row" onSubmit={handleUrlFormSubmit} noValidate>
           <div className="control-label-row">
             <label className="control-label" htmlFor="bwf-url-input">
-              Results page URL
+              Match schedule page URL
             </label>
             <span id="bwf-url-hint" className="control-hint">
               Must end with a date in <code>YYYY-MM-DD</code> format (for example{' '}
@@ -809,7 +809,7 @@ export default function App() {
         ) : null}
         {content?.kind === 'html' && convertedHtml ? <PageView html={convertedHtml} /> : null}
         {!content && !loading && !error ? (
-          <div className="status-box">Enter a BWF results page URL ending with YYYY-MM-DD above and press Refresh.</div>
+          <div className="status-box">Enter a BWF match schedule page URL ending with YYYY-MM-DD above and press Refresh.</div>
         ) : null}
       </main>
 

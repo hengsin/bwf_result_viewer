@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "BWF Match Schedule",
+  "version": "1.0.0",
+  "description": "Fetch BWF tournament schedules and display match times in your local browser timezone.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "Open BWF Match Schedule",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "48": "icons/icon-48.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "index.html"
+  },
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "permissions": ["sidePanel", "tabs"],
+  "host_permissions": [
+    "https://extranet-lv.bwfbadminton.com/*",
+    "https://bwfworldtour.bwfbadminton.com/*",
+    "https://match-centre.bwfbadminton.com/*",
+    "https://bwfbadminton.com/*",
+    "https://corporate.bwfbadminton.com/*"
+  ]
+}

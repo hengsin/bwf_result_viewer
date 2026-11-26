@@ -1,8 +1,8 @@
-# BWF Local Time
+# BWF Match Schedule
 
 A TypeScript/React web app that fetches BWF (Badminton World Federation) tournament schedules or pages and re-renders match times in **your local browser timezone**.
 
-BWF tournament results pages (for example `https://bwfworldtour.bwfbadminton.com/tournament/5273/hylo-open-2026/results/2026-10-29`) display times in the **venue/stadium timezone** rather than the visitor's local timezone.
+BWF tournament match schedule pages (for example `https://bwfworldtour.bwfbadminton.com/tournament/5273/hylo-open-2026/results/2026-10-29`) display times in the **venue/stadium timezone** rather than the visitor's local timezone.
 
 ## Features
 
@@ -41,6 +41,30 @@ npm run dev -- https://bwfworldtour.bwfbadminton.com/tournament/5273/hylo-open-2
 ```
 
 You can also run `npm run build` (`tsc -b && vite build`), `npm run preview`, or `npm run lint` (`oxlint`).
+
+## Chrome Extension (Manifest V3)
+
+Build the standalone Chrome Extension (opens as a Side Panel, no local server required):
+
+```bash
+npm run build:extension
+```
+
+Load `dist-extension/` as an unpacked extension in `chrome://extensions` (enable **Developer mode** → **Load unpacked**).
+
+## Standalone Desktop App (Electron)
+
+Run the desktop app locally or build portable packages for Linux (`AppImage`, `tar.gz`), Windows (`portable`), and macOS (`zip`, `dmg`):
+
+```bash
+npm run desktop:dev
+npm run build:desktop        # builds for current OS
+npm run build:desktop:linux  # Linux AppImage + tar.gz
+npm run build:desktop:win    # Windows portable .exe
+npm run build:desktop:mac    # macOS zip + dmg (requires macOS)
+```
+
+Packaged binaries are written to `dist-desktop/`.
 
 ## Test
 

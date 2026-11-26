@@ -1,4 +1,4 @@
-/* Headless smoke test for the BWF Local Time app. */
+/* Headless smoke test for the BWF Match Schedule app. */
 const puppeteer = require('puppeteer-core')
 
 const run = async () => {

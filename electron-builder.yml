@@ -1,0 +1,22 @@
+appId: com.bwflocaltime.app
+productName: BWF Match Schedule
+directories:
+  output: dist-desktop
+files:
+  - dist/**/*
+  - electron/**/*
+  - package.json
+mac:
+  icon: electron/icons/icon-512.png
+  target:
+    - zip
+    - dmg
+win:
+  icon: electron/icons/icon-256.png
+  target:
+    - portable
+linux:
+  icon: electron/icons/icon-512.png
+  target:
+    - AppImage
+    - tar.gz

@@ -95,6 +95,18 @@ const bwfProxyPlugin = (): Plugin => ({
   },
 })
 
-export default defineConfig({
-  plugins: [react(), bwfProxyPlugin()],
+export default defineConfig(({ mode }) => {
+  if (mode === 'extension') {
+    return {
+      base: './',
+      plugins: [react()],
+      build: {
+        outDir: 'dist-extension',
+        emptyOutDir: true,
+      },
+    }
+  }
+  return {
+    plugins: [react(), bwfProxyPlugin()],
+  }
 })

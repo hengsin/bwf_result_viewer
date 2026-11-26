@@ -84,8 +84,13 @@ export interface BwfTournamentDetails {
   tournament: BwfTournament
 }
 
-export const EXTRANET_BASE = '/proxy/extranet'
-export const CORPORATE_BASE = '/proxy/corporate'
+const isChromeExtension = (): boolean => {
+  const g = globalThis as { chrome?: { runtime?: { id?: string } } }
+  return Boolean(g.chrome?.runtime?.id)
+}
+
+export const EXTRANET_BASE = isChromeExtension() ? 'https://extranet-lv.bwfbadminton.com' : '/proxy/extranet'
+export const CORPORATE_BASE = isChromeExtension() ? 'https://corporate.bwfbadminton.com' : '/proxy/corporate'
 
 export interface CalendarTournament {
   id: string
@@ -253,6 +258,9 @@ export interface ProxyTarget {
 
 export function toProxyUrl(url: string): ProxyTarget {
   const withProtocol = /^https?:\/\//i.test(url) ? url : `https://${url}`
+  if (isChromeExtension()) {
+    return { proxyPath: null, directUrl: withProtocol }
+  }
   const parsed = new URL(withProtocol)
   const path = `${parsed.pathname}${parsed.search}`
   switch (parsed.host) {
@@ -456,7 +464,7 @@ export function validateBwfUrl(rawUrl: string): BwfUrlValidationResult {
   if (!trimmed) {
     return {
       valid: false,
-      error: 'Please enter a BWF results page URL ending with a date in YYYY-MM-DD format.',
+      error: 'Please enter a BWF match schedule page URL ending with a date in YYYY-MM-DD format.',
     }
   }
   const schemeMatch = EXPLICIT_SCHEME_PATTERN.exec(trimmed)
