@@ -39,15 +39,28 @@ interface CourtSidebarProps {
   onRequestNotificationPermission: () => void
   soundEnabled: boolean
   onToggleSound: (enabled: boolean) => void
+  loading: boolean
+  onRefreshNow: () => void
   autoRefresh: boolean
+  onAutoRefreshChange: (enabled: boolean) => void
+  autoRefreshIntervalSec: number
+  onAutoRefreshIntervalChange: (seconds: number) => void
+  secondsUntilRefresh: number | null
   onEnableAutoRefresh: () => void
   hasActiveFilters: boolean
   onResetFilters: () => void
 }
 
+function formatCountdown(seconds: number): string {
+  const safe = Math.max(0, Math.floor(seconds))
+  const minutes = String(Math.floor(safe / 60)).padStart(2, '0')
+  const rest = String(safe % 60).padStart(2, '0')
+  return `${minutes}:${rest}`
+}
+
 /**
- * Sticky sidebar displaying schedule filters (in-progress & country), pinned matches with
- * start-alert controls, and quick anchor navigation between courts.
+ * Sticky sidebar displaying refresh controls, schedule filters (in-progress & country),
+ * pinned matches with start-alert controls, and quick anchor navigation between courts.
  */
 export function CourtSidebar({
   courts,
@@ -69,15 +82,17 @@ export function CourtSidebar({
   onRequestNotificationPermission,
   soundEnabled,
   onToggleSound,
+  loading,
+  onRefreshNow,
   autoRefresh,
+  onAutoRefreshChange,
+  autoRefreshIntervalSec,
+  onAutoRefreshIntervalChange,
+  secondsUntilRefresh,
   onEnableAutoRefresh,
   hasActiveFilters,
   onResetFilters,
 }: CourtSidebarProps) {
-  if (totalMatchCount === 0) {
-    return null
-  }
-
   const activeCourt = courts.find((court) => court.id === activeCourtId) ?? courts[0] ?? null
   const activeMatchWord = activeCourt && activeCourt.matchCount === 1 ? 'match' : 'matches'
   const activeCourtMeta = activeCourt
@@ -91,9 +106,52 @@ export function CourtSidebar({
     : ''
 
   return (
-    <aside className="court-sidebar" aria-label="Schedule filters and court navigation">
+    <aside className="court-sidebar" aria-label="Schedule controls, filters, and court navigation">
       <div className="court-sidebar-panel">
-        <div className="sidebar-section sidebar-filters">
+        <div className="sidebar-section sidebar-refresh">
+          <div className="sidebar-section-header">
+            <span className="court-sidebar-eyebrow">Refresh</span>
+            <span className={`countdown${autoRefresh ? ' is-active' : ''}`}>
+              {autoRefresh
+                ? `Next in ${formatCountdown(secondsUntilRefresh ?? autoRefreshIntervalSec)}`
+                : 'Off'}
+            </span>
+          </div>
+
+          <button type="button" className="btn sidebar-refresh-btn" onClick={onRefreshNow} disabled={loading}>
+            {loading ? 'Refreshing…' : 'Refresh now'}
+          </button>
+
+          <div className="sidebar-refresh-controls">
+            <label className="auto-refresh-toggle" htmlFor="bwf-auto-refresh-toggle">
+              <input
+                id="bwf-auto-refresh-toggle"
+                type="checkbox"
+                checked={autoRefresh}
+                onChange={(event) => onAutoRefreshChange(event.target.checked)}
+              />
+              <span>Auto refresh</span>
+            </label>
+            <select
+              aria-label="Auto refresh interval"
+              className="interval-select sidebar-interval-select"
+              value={autoRefreshIntervalSec}
+              onChange={(event) => onAutoRefreshIntervalChange(Number(event.target.value))}
+              disabled={!autoRefresh}
+            >
+              <option value={30}>every 30 seconds</option>
+              <option value={60}>every minute</option>
+              <option value={300}>every 5 minutes</option>
+              <option value={900}>every 15 minutes</option>
+              <option value={1800}>every 30 minutes</option>
+              <option value={3600}>every hour</option>
+            </select>
+          </div>
+        </div>
+
+        {totalMatchCount > 0 ? (
+          <>
+            <div className="sidebar-section sidebar-filters">
           <div className="sidebar-section-header">
             <span className="court-sidebar-eyebrow">Filters</span>
             {hasActiveFilters ? (
@@ -277,6 +335,8 @@ export function CourtSidebar({
             <p className="sidebar-empty-hint">No courts match the active filters.</p>
           )}
         </div>
+          </>
+        ) : null}
       </div>
     </aside>
   )

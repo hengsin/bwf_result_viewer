@@ -151,6 +151,15 @@ export function getMatchStatusTone(match: DayMatch): MatchStatusTone {
   return 'scheduled'
 }
 
+function isUnplayedWalkover(match: DayMatch): boolean {
+  if (match.matchStatus !== 'O') {
+    return false
+  }
+  const hasScore = Array.isArray(match.score) && match.score.length > 0
+  const hasDuration = typeof match.duration === 'number' && Number.isFinite(match.duration) && match.duration > 0
+  return !hasScore && !hasDuration
+}
+
 export function getMatchKey(match: DayMatch, fallbackTournamentCode = ''): string {
   const scope = (match.tournamentCode || fallbackTournamentCode || 'tmt').trim()
   return `${scope}:${match.id}`
@@ -294,6 +303,40 @@ function parseMatchTime(
     minute: Number(match[5]),
     second: match[6] ? Number(match[6]) : 0,
   }
+}
+
+/**
+ * Parses BWF's `matchTimeUtc` string into a UTC `Date` instant when present and valid.
+ * Preferring `matchTimeUtc` avoids BWF's half-hour timezone conversion bug in `matchTime`.
+ */
+function parseMatchTimeUtc(matchTimeUtc: string | null | undefined): Date | null {
+  if (!matchTimeUtc) {
+    return null
+  }
+  const match = /^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(?:Z)?$/i.exec(
+    matchTimeUtc.trim(),
+  )
+  if (!match) {
+    return null
+  }
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const hour = Number(match[4])
+  const minute = Number(match[5])
+  const second = match[6] ? Number(match[6]) : 0
+  if (year < 1970 || month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 59) {
+    return null
+  }
+  const instant = new Date(Date.UTC(year, month - 1, day, hour, minute, second))
+  if (
+    instant.getUTCFullYear() !== year ||
+    instant.getUTCMonth() !== month - 1 ||
+    instant.getUTCDate() !== day
+  ) {
+    return null
+  }
+  return instant
 }
 
 export function toCourtId(name: string, usedIds: Set<string>): string {
@@ -490,6 +533,7 @@ function adjustCourtTimesForLiveMatch(courtList: MatchTimeView[], localTz: strin
   const estimatedLiveEndMs = liveNowMs + remainingMin * 60_000
 
   let cursorStartMs = roundToMinuteMs(estimatedLiveEndMs + MATCH_CHANGEOVER_MIN * 60_000)
+  let lastPlacedIdx = -1
 
   for (let i = liveIdx + 1; i < courtList.length; i += 1) {
     const current = courtList[i]
@@ -505,13 +549,14 @@ function adjustCourtTimesForLiveMatch(courtList: MatchTimeView[], localTz: strin
     let candidateMs = cursorStartMs
     const hasTimeFloor = current.match.oopTypeId === 1 || current.match.oopTypeId === 2
 
-    if (i > liveIdx + 1) {
-      const prevScheduledMs = courtList[i - 1].scheduledInstant.getTime()
+    if (lastPlacedIdx !== -1) {
+      const prevScheduledMs = courtList[lastPlacedIdx].scheduledInstant.getTime()
       const currScheduledMs = current.scheduledInstant.getTime()
       const rawGapMs = currScheduledMs - prevScheduledMs
       const defaultSlotMs = DEFAULT_MATCH_SLOT_MIN * 60_000
+      const maxSlotMs = 75 * 60_000
       let slotDurationMs =
-        rawGapMs >= 15 * 60_000 && rawGapMs <= 120 * 60_000 ? rawGapMs : defaultSlotMs
+        rawGapMs >= 15 * 60_000 && rawGapMs <= maxSlotMs ? rawGapMs : defaultSlotMs
       if (hasTimeFloor && slotDurationMs > defaultSlotMs) {
         slotDurationMs = defaultSlotMs
       }
@@ -523,6 +568,7 @@ function adjustCourtTimesForLiveMatch(courtList: MatchTimeView[], localTz: strin
       : candidateMs
 
     cursorStartMs = adjustedMs
+    lastPlacedIdx = i
 
     const deltaMin = Math.round((adjustedMs - current.scheduledInstant.getTime()) / 60_000)
     if (deltaMin !== 0) {
@@ -551,21 +597,26 @@ export function buildOrderedScheduleViews(
   for (const match of matches) {
     const courtName = match.courtName && match.courtName.trim() !== '' ? match.courtName.trim() : 'Court TBC'
     const matchKey = getMatchKey(match, tournamentCode)
-    const parts = parseMatchTime(match.matchTime)
-    const instant = sourceWallTimeToInstant(
-      parts.year,
-      parts.month,
-      parts.day,
-      parts.hour,
-      parts.minute,
-      parts.second,
-      sourceTimeZone,
-    )
+    const utcInstant = parseMatchTimeUtc(match.matchTimeUtc)
+    const instant =
+      utcInstant ??
+      (() => {
+        const parts = parseMatchTime(match.matchTime)
+        return sourceWallTimeToInstant(
+          parts.year,
+          parts.month,
+          parts.day,
+          parts.hour,
+          parts.minute,
+          parts.second,
+          sourceTimeZone,
+        )
+      })()
     const formattedScheduledTime = formatTimeOfDay(instant, localTz)
     const rawActualStartMs = Object.hasOwn(actualStartTimes, matchKey) ? actualStartTimes[matchKey] : undefined
     const canShowActualStart =
       (isMatchLive(match) || isMatchFinished(match)) &&
-      match.matchStatus !== 'O' &&
+      !isUnplayedWalkover(match) &&
       typeof rawActualStartMs === 'number' &&
       Number.isFinite(rawActualStartMs)
     const actualStartInstant = canShowActualStart ? new Date(rawActualStartMs) : null
@@ -626,9 +677,9 @@ export function buildOrderedScheduleViews(
         const prevDurationMin = previous.match.duration
         if (
           !current.isActualStartTime &&
-          current.match.matchStatus !== 'O' &&
+          !isUnplayedWalkover(current.match) &&
           isMatchFinished(previous.match) &&
-          previous.match.matchStatus !== 'O' &&
+          !isUnplayedWalkover(previous.match) &&
           typeof prevDurationMin === 'number' &&
           Number.isFinite(prevDurationMin) &&
           prevDurationMin > 0
@@ -741,7 +792,7 @@ export function findCourtFocusTarget(matches: readonly MatchTimeView[]): CourtFo
     if (fallbackFinishedIdx === -1) {
       fallbackFinishedIdx = i
     }
-    const isWalkover = view.match.matchStatus === 'O'
+    const isWalkover = isUnplayedWalkover(view.match)
     const allEarlierFinished = matches.slice(0, i).every((prev) => isMatchFinished(prev.match))
     if (!isWalkover || allEarlierFinished) {
       preferredFinishedIdx = i

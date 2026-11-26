@@ -364,24 +364,31 @@ function formatUtcOffset(offsetMinutes: number): string {
   return `${sign}${hours}:${minutes}`
 }
 
-function extractMatchOffset(matches: DayMatch[]): { offsetMinutes: number; utcInstant: Date } | null {
+interface MatchOffsetSample {
+  offsetMinutes: number
+  utcInstant: Date
+  isAnchored: boolean
+}
+
+function collectMatchOffsets(matches: DayMatch[], out: MatchOffsetSample[] = []): MatchOffsetSample[] {
   for (const match of matches) {
     const localMs = parseApiDateTimeAsUtcMs(match.matchTime)
     const utcMs = parseApiDateTimeAsUtcMs(match.matchTimeUtc)
     if (localMs !== null && utcMs !== null) {
       const offsetMinutes = Math.round((localMs - utcMs) / 60000)
       if (offsetMinutes >= -12 * 60 && offsetMinutes <= 14 * 60) {
-        return { offsetMinutes, utcInstant: new Date(utcMs) }
+        out.push({
+          offsetMinutes,
+          utcInstant: new Date(utcMs),
+          isAnchored: match.oopTypeId === 1 || match.oopTypeId === 2,
+        })
       }
     }
     if (match.matches && match.matches.length > 0) {
-      const nested = extractMatchOffset(match.matches)
-      if (nested) {
-        return nested
-      }
+      collectMatchOffsets(match.matches, out)
     }
   }
-  return null
+  return out
 }
 
 /**
@@ -392,19 +399,32 @@ export function inferTournamentTimeZone(tournament: BwfTournament, matches: DayM
   const haystack = [tournament.name, tournament.slug, tournament.venue_name, tournament.venue_address1]
     .filter(Boolean)
     .join(' ')
-  const offsetInfo = extractMatchOffset(matches)
+  const samples = collectMatchOffsets(matches)
+  const primarySample = samples.find((sample) => sample.isAnchored) ?? samples[0] ?? null
 
-  if (offsetInfo) {
+  if (primarySample) {
+    const hasAnchoredSample = samples.some((sample) => sample.isAnchored)
+    const minOffset = Math.min(...samples.map((sample) => sample.offsetMinutes))
+    const maxOffset = Math.max(...samples.map((sample) => sample.offsetMinutes))
+
     for (const hint of TOURNAMENT_TIMEZONE_HINTS) {
       if (!hint.pattern.test(haystack)) {
         continue
       }
-      const candidateOffsetMinutes = Math.round(getTimeZoneOffsetMs(hint.timeZone, offsetInfo.utcInstant) / 60000)
-      if (candidateOffsetMinutes === offsetInfo.offsetMinutes) {
+      const matchesSampleOffset = samples.some(
+        (sample) => Math.round(getTimeZoneOffsetMs(hint.timeZone, sample.utcInstant) / 60000) === sample.offsetMinutes,
+      )
+      if (matchesSampleOffset) {
         return hint.timeZone
       }
+      if (!hasAnchoredSample) {
+        const candidateOffset = Math.round(getTimeZoneOffsetMs(hint.timeZone, primarySample.utcInstant) / 60000)
+        if (candidateOffset >= minOffset && candidateOffset <= maxOffset) {
+          return hint.timeZone
+        }
+      }
     }
-    return formatUtcOffset(offsetInfo.offsetMinutes)
+    return formatUtcOffset(primarySample.offsetMinutes)
   }
 
   for (const hint of TOURNAMENT_TIMEZONE_HINTS) {

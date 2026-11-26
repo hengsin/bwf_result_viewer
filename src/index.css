@@ -750,7 +750,7 @@ body {
 
 .controls-secondary-grid {
   display: grid;
-  grid-template-columns: minmax(190px, 260px) minmax(0, 1fr);
+  grid-template-columns: minmax(190px, 280px);
   gap: 12px 24px;
   align-items: end;
   padding-top: 14px;
@@ -1486,6 +1486,27 @@ progress.loading-spinner.is-sm:indeterminate {
 .sidebar-section + .sidebar-section {
   padding-top: 15px;
   border-top: 1px solid var(--panel-border);
+}
+
+.sidebar-refresh-btn {
+  inline-size: 100%;
+  min-block-size: 38px;
+}
+
+.sidebar-refresh-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.sidebar-refresh-controls .auto-refresh-toggle {
+  min-block-size: 28px;
+}
+
+.sidebar-interval-select {
+  inline-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 36px;
 }
 
 .sidebar-section-header {
@@ -2496,14 +2517,14 @@ progress.loading-spinner.is-sm:indeterminate {
 .match-set {
   font-family: var(--font-sans);
   font-variant-numeric: tabular-nums;
-  font-size: var(--text-sm);
+  font-size: var(--text-body);
   font-weight: 600;
   color: var(--text-secondary);
   background: var(--score-bg);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius-sm);
-  padding: 2px 9px;
-  min-inline-size: 56px;
+  padding: 3px 10px;
+  min-inline-size: 60px;
   display: inline-flex;
   justify-content: center;
   gap: 4px;

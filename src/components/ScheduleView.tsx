@@ -338,7 +338,13 @@ interface ScheduleViewProps {
   onOnlyInProgressChange: (next: boolean) => void
   selectedCountry: string
   onSelectedCountryChange: (countryCode: string) => void
+  loading: boolean
+  onRefreshNow: () => void
   autoRefresh: boolean
+  onAutoRefreshChange: (enabled: boolean) => void
+  autoRefreshIntervalSec: number
+  onAutoRefreshIntervalChange: (seconds: number) => void
+  secondsUntilRefresh: number | null
   onEnableAutoRefresh: () => void
   actualStartTimes: Readonly<ActualStartTimesMap>
 }
@@ -354,7 +360,13 @@ export function ScheduleView({
   onOnlyInProgressChange,
   selectedCountry,
   onSelectedCountryChange,
+  loading,
+  onRefreshNow,
   autoRefresh,
+  onAutoRefreshChange,
+  autoRefreshIntervalSec,
+  onAutoRefreshIntervalChange,
+  secondsUntilRefresh,
   onEnableAutoRefresh,
   actualStartTimes,
 }: ScheduleViewProps) {
@@ -1106,7 +1118,7 @@ export function ScheduleView({
   }, [allViews.length, onlyInProgress, selectedCountryOption])
 
   return (
-    <div className={`schedule${allViews.length > 0 ? ' schedule--with-sidebar' : ''}`}>
+    <div className="schedule schedule--with-sidebar">
       <CourtSidebar
         courts={courtSummaries}
         totalMatchCount={allViews.length}
@@ -1127,7 +1139,13 @@ export function ScheduleView({
         onRequestNotificationPermission={handleRequestNotificationPermission}
         soundEnabled={soundEnabled}
         onToggleSound={handleToggleSound}
+        loading={loading}
+        onRefreshNow={onRefreshNow}
         autoRefresh={autoRefresh}
+        onAutoRefreshChange={onAutoRefreshChange}
+        autoRefreshIntervalSec={autoRefreshIntervalSec}
+        onAutoRefreshIntervalChange={onAutoRefreshIntervalChange}
+        secondsUntilRefresh={secondsUntilRefresh}
         onEnableAutoRefresh={onEnableAutoRefresh}
         hasActiveFilters={hasActiveFilters}
         onResetFilters={handleResetFilters}

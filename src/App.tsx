@@ -68,13 +68,6 @@ interface ContentState {
   contextDate: string
 }
 
-function formatCountdown(seconds: number): string {
-  const safe = Math.max(0, Math.floor(seconds))
-  const minutes = String(Math.floor(safe / 60)).padStart(2, '0')
-  const rest = String(safe % 60).padStart(2, '0')
-  return `${minutes}:${rest}`
-}
-
 export default function App() {
   const [initialUrl] = useState(() => getInitialUrl())
   const [initialValidation] = useState(() => (initialUrl ? validateBwfUrl(initialUrl) : null))
@@ -748,40 +741,6 @@ export default function App() {
               ))}
             </datalist>
           </div>
-
-          <div className="control-row">
-            <span className="control-label">Auto refresh</span>
-            <div className="controls-row">
-              <label className="auto-refresh-toggle" htmlFor="bwf-auto-refresh-toggle">
-                <input
-                  id="bwf-auto-refresh-toggle"
-                  type="checkbox"
-                  checked={autoRefresh}
-                  onChange={(event) => setAutoRefresh(event.target.checked)}
-                />
-                Enabled
-              </label>
-              <select
-                aria-label="Auto refresh interval"
-                className="interval-select"
-                value={autoRefreshIntervalSec}
-                onChange={(event) => setAutoRefreshIntervalSec(Number(event.target.value))}
-                disabled={!autoRefresh}
-              >
-                <option value={30}>every 30 seconds</option>
-                <option value={60}>every minute</option>
-                <option value={300}>every 5 minutes</option>
-                <option value={900}>every 15 minutes</option>
-                <option value={1800}>every 30 minutes</option>
-                <option value={3600}>every hour</option>
-              </select>
-              <span className={`countdown${autoRefresh ? ' is-active' : ''}`}>
-                {autoRefresh
-                  ? `Next refresh in ${formatCountdown(secondsUntilRefresh ?? autoRefreshIntervalSec)}`
-                  : 'Off'}
-              </span>
-            </div>
-          </div>
         </div>
       </section>
 
@@ -802,7 +761,13 @@ export default function App() {
             onOnlyInProgressChange={setOnlyInProgress}
             selectedCountry={selectedCountry}
             onSelectedCountryChange={setSelectedCountry}
+            loading={loading}
+            onRefreshNow={loadNow}
             autoRefresh={autoRefresh}
+            onAutoRefreshChange={setAutoRefresh}
+            autoRefreshIntervalSec={autoRefreshIntervalSec}
+            onAutoRefreshIntervalChange={setAutoRefreshIntervalSec}
+            secondsUntilRefresh={secondsUntilRefresh}
             onEnableAutoRefresh={handleEnableAutoRefresh}
             actualStartTimes={actualStartTimes}
           />
@@ -818,9 +783,6 @@ export default function App() {
       </div>
 
       <footer className="app-footer">
-        <button type="button" className="btn" onClick={loadNow} disabled={loading}>
-          Refresh now
-        </button>
         <span className="footer-note">Content is fetched live from the BWF website.</span>
       </footer>
     </div>
