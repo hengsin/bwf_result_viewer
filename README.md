@@ -48,6 +48,7 @@ Build the standalone Chrome Extension (opens as a Side Panel, no local server re
 
 ```bash
 npm run build:extension
+npm run build:extension:zip # outputs bwf-match-schedule-chrome-extension-<version>.zip
 ```
 
 Load `dist-extension/` as an unpacked extension in `chrome://extensions` (enable **Developer mode** → **Load unpacked**).
@@ -62,6 +63,7 @@ npm run build:desktop        # builds for current OS
 npm run build:desktop:linux  # Linux AppImage + tar.gz
 npm run build:desktop:win    # Windows portable .exe
 npm run build:desktop:mac    # macOS zip + dmg (requires macOS)
+npm run build:desktop:mac:zip # macOS zip only (works on Linux/macOS; add -- --arm64 for Apple Silicon)
 ```
 
 Packaged binaries are written to `dist-desktop/`.

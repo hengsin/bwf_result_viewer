@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "BWF Match Schedule",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Fetch BWF tournament schedules and display match times in your local browser timezone.",
   "icons": {
     "16": "icons/icon-16.png",

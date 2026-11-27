@@ -4,7 +4,11 @@ import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readFile, unlink } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version?: string }
+const APP_VERSION = pkg.version ?? '1.0.1'
 
 // Proxy the BWF backend hosts so the browser can fetch them without CORS issues.
 // /proxy/<name>/... -> https://<host>/...
@@ -96,9 +100,13 @@ const bwfProxyPlugin = (): Plugin => ({
 })
 
 export default defineConfig(({ mode }) => {
+  const define = {
+    __APP_VERSION__: JSON.stringify(APP_VERSION),
+  }
   if (mode === 'extension') {
     return {
       base: './',
+      define,
       plugins: [react()],
       build: {
         outDir: 'dist-extension',
@@ -107,6 +115,7 @@ export default defineConfig(({ mode }) => {
     }
   }
   return {
+    define,
     plugins: [react(), bwfProxyPlugin()],
   }
 })

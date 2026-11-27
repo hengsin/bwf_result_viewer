@@ -41,7 +41,24 @@ import { CurrentMonthTournaments } from './components/CurrentMonthTournaments'
 import { ScheduleView } from './components/ScheduleView'
 import { PageView } from './components/PageView'
 import { ThemeSelector } from './components/ThemeSelector'
+import { UpdateBanner } from './components/UpdateBanner'
 import { WeekDateSelector } from './components/WeekDateSelector'
+import {
+  checkForAppUpdates,
+  getAppVersion,
+  getSafeReleaseUrl,
+  isDesktopApp,
+  loadDismissedUpdateVersion,
+  saveDismissedUpdateVersion,
+  type UpdateCheckResult,
+} from './lib/update'
+import {
+  clampDesktopZoomFactor,
+  getDesktopBridge,
+  loadSavedZoomFactor,
+  saveZoomFactor,
+  type DesktopZoomAction,
+} from './lib/desktop'
 
 declare global {
   interface Window {
@@ -103,6 +120,14 @@ export default function App() {
   const [calendarRetryKey, setCalendarRetryKey] = useState(0)
   const [resolvingTournamentId, setResolvingTournamentId] = useState<string | null>(null)
   const [resolveTournamentError, setResolveTournamentError] = useState<string | null>(null)
+  const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null)
+  const [updateBannerDismissed, setUpdateBannerDismissed] = useState(false)
+  const [checkingUpdates, setCheckingUpdates] = useState(false)
+  const [manualUpdateStatus, setManualUpdateStatus] = useState<string | null>(null)
+  const [zoomFactor, setZoomFactor] = useState(1)
+
+  const desktopApp = isDesktopApp()
+  const appVersion = getAppVersion()
 
   const manualTimeZoneOverrideRef = useRef(false)
   const sourceTimeZoneRef = useRef(sourceTimeZone)
@@ -250,6 +275,109 @@ export default function App() {
     setThemePreference(next)
     saveThemePreference(next)
     applyThemeMeta(next)
+  }, [])
+
+  useEffect(() => {
+    if (!desktopApp) {
+      return
+    }
+    const controller = new AbortController()
+    void checkForAppUpdates(false, controller.signal)
+      .then((result) => {
+        if (controller.signal.aborted) {
+          return
+        }
+        setUpdateResult(result)
+        if (result.status === 'update-available' && result.latestVersion) {
+          setUpdateBannerDismissed(loadDismissedUpdateVersion() === result.latestVersion)
+        }
+      })
+      .catch(() => {
+        // Startup background update checks fail silently when offline.
+      })
+    return () => {
+      controller.abort()
+    }
+  }, [desktopApp])
+
+  const handleManualUpdateCheck = useCallback(async () => {
+    if (!desktopApp || checkingUpdates) {
+      return
+    }
+    setCheckingUpdates(true)
+    setManualUpdateStatus(null)
+    try {
+      const result = await checkForAppUpdates(true)
+      setUpdateResult(result)
+      if (result.status === 'update-available' && result.latestVersion) {
+        setUpdateBannerDismissed(false)
+        setManualUpdateStatus(`Update available: v${result.latestVersion}`)
+      } else if (result.status === 'up-to-date') {
+        setManualUpdateStatus(`You are up to date (v${result.currentVersion})`)
+      } else {
+        setManualUpdateStatus(result.error ?? 'Unable to check for updates right now.')
+      }
+    } catch {
+      setManualUpdateStatus('Unable to check for updates right now.')
+    } finally {
+      setCheckingUpdates(false)
+    }
+  }, [checkingUpdates, desktopApp])
+
+  const handleDismissUpdateBanner = useCallback(() => {
+    if (updateResult?.latestVersion) {
+      saveDismissedUpdateVersion(updateResult.latestVersion)
+    }
+    setUpdateBannerDismissed(true)
+  }, [updateResult])
+
+  useEffect(() => {
+    const bridge = getDesktopBridge()
+    if (!desktopApp || !bridge) {
+      return
+    }
+    let active = true
+    const savedZoom = loadSavedZoomFactor()
+    const initPromise =
+      savedZoom !== null && Math.abs(savedZoom - 1) > 0.001
+        ? bridge.setZoomFactor(savedZoom)
+        : bridge.getZoomFactor()
+    void initPromise.then((factor) => {
+      if (active) {
+        const clamped = clampDesktopZoomFactor(factor)
+        setZoomFactor(clamped)
+        saveZoomFactor(clamped)
+      }
+    })
+
+    const unsubscribe = bridge.onZoomChanged((factor) => {
+      const clamped = clampDesktopZoomFactor(factor)
+      setZoomFactor(clamped)
+      saveZoomFactor(clamped)
+    })
+
+    const handleWheel = (event: WheelEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.deltaY === 0) {
+        return
+      }
+      event.preventDefault()
+      void bridge.zoom(event.deltaY < 0 ? 'in' : 'out')
+    }
+    window.addEventListener('wheel', handleWheel, { passive: false })
+
+    return () => {
+      active = false
+      unsubscribe()
+      window.removeEventListener('wheel', handleWheel)
+    }
+  }, [desktopApp])
+
+  const handleDesktopZoom = useCallback((action: DesktopZoomAction) => {
+    const bridge = getDesktopBridge()
+    if (!bridge) {
+      return
+    }
+    void bridge.zoom(action)
   }, [])
 
   const runLoad = useCallback(async (targetUrl: string) => {
@@ -812,7 +940,80 @@ export default function App() {
 
       <footer className="app-footer">
         <span className="footer-note">Content is fetched live from the BWF website.</span>
+        <div className="footer-meta">
+          {desktopApp ? (
+            <div className="footer-zoom-group" role="group" aria-label="Zoom">
+              <button
+                type="button"
+                className="footer-zoom-btn"
+                aria-label="Zoom out"
+                onClick={() => handleDesktopZoom('out')}
+                disabled={zoomFactor <= 0.5}
+              >
+                −
+              </button>
+              <button
+                type="button"
+                className="footer-zoom-btn footer-zoom-reset"
+                aria-label={`Reset zoom (currently ${Math.round(zoomFactor * 100)}%)`}
+                onClick={() => handleDesktopZoom('reset')}
+                disabled={Math.abs(zoomFactor - 1) < 0.005}
+              >
+                {Math.round(zoomFactor * 100)}%
+              </button>
+              <button
+                type="button"
+                className="footer-zoom-btn"
+                aria-label="Zoom in"
+                onClick={() => handleDesktopZoom('in')}
+                disabled={zoomFactor >= 3}
+              >
+                +
+              </button>
+            </div>
+          ) : null}
+          <span className="footer-version">v{appVersion}</span>
+          {desktopApp ? (
+            <>
+              <button
+                type="button"
+                className="footer-update-btn"
+                onClick={() => void handleManualUpdateCheck()}
+                disabled={checkingUpdates}
+              >
+                {checkingUpdates ? 'Checking…' : 'Check for updates'}
+              </button>
+              {updateResult?.status === 'update-available' && updateResult.latestVersion ? (
+                <a
+                  href={getSafeReleaseUrl(updateResult.releaseUrl)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="footer-update-link"
+                >
+                  Download v{updateResult.latestVersion}
+                </a>
+              ) : null}
+              {manualUpdateStatus && updateResult?.status !== 'update-available' ? (
+                <span className="footer-update-status" role="status" aria-live="polite">
+                  {manualUpdateStatus}
+                </span>
+              ) : null}
+            </>
+          ) : null}
+        </div>
       </footer>
+
+      {desktopApp &&
+      updateResult?.status === 'update-available' &&
+      updateResult.latestVersion &&
+      !updateBannerDismissed ? (
+        <UpdateBanner
+          currentVersion={updateResult.currentVersion}
+          latestVersion={updateResult.latestVersion}
+          releaseUrl={updateResult.releaseUrl}
+          onDismiss={handleDismissUpdateBanner}
+        />
+      ) : null}
     </div>
   )
 }

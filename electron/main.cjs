@@ -1,12 +1,22 @@
-const { app, BrowserWindow, net, shell } = require('electron')
+const { app, BrowserWindow, Menu, ipcMain, net, shell } = require('electron')
 const { execFile } = require('node:child_process')
 const { readFile, unlink } = require('node:fs/promises')
 const http = require('node:http')
 const os = require('node:os')
 const path = require('node:path')
 const { promisify } = require('node:util')
+const pkg = require('../package.json')
+const { createUpdateChecker } = require('./updater.cjs')
 
 const execFileAsync = promisify(execFile)
+const APP_VERSION = (pkg && typeof pkg.version === 'string' && pkg.version) || app.getVersion()
+const ZOOM_STEPS = [0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0]
+const MIN_ZOOM_FACTOR = ZOOM_STEPS[0]
+const MAX_ZOOM_FACTOR = ZOOM_STEPS[ZOOM_STEPS.length - 1]
+const updateChecker = createUpdateChecker({
+  currentVersion: APP_VERSION,
+  fetchImpl: (url, init) => net.fetch(url, init),
+})
 
 const BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36'
@@ -105,7 +115,30 @@ function createLocalServer(distDir) {
           res.statusCode = 200
           res.setHeader('content-type', 'application/javascript; charset=utf-8')
           res.setHeader('cache-control', 'no-store')
-          res.end(`window.__BWF_INITIAL_URL__ = ${JSON.stringify(initialUrl)};\n`)
+          res.setHeader('x-content-type-options', 'nosniff')
+          res.end(
+            `window.__BWF_INITIAL_URL__ = ${JSON.stringify(initialUrl)};\n` +
+              `window.__BWF_DESKTOP__ = true;\n` +
+              `window.__BWF_APP_VERSION__ = ${JSON.stringify(APP_VERSION)};\n`,
+          )
+          return
+        }
+
+        if (reqUrl.pathname === '/__bwf_update_check') {
+          if (req.method !== 'GET') {
+            res.statusCode = 405
+            res.setHeader('content-type', 'application/json; charset=utf-8')
+            res.setHeader('x-content-type-options', 'nosniff')
+            res.end(JSON.stringify({ error: 'Method Not Allowed' }))
+            return
+          }
+          const force = reqUrl.searchParams.get('force') === '1'
+          const result = await updateChecker.checkForUpdates({ force })
+          res.statusCode = 200
+          res.setHeader('content-type', 'application/json; charset=utf-8')
+          res.setHeader('cache-control', 'no-store')
+          res.setHeader('x-content-type-options', 'nosniff')
+          res.end(JSON.stringify(result))
           return
         }
 
@@ -167,6 +200,116 @@ function createLocalServer(distDir) {
 
 let localServer = null
 
+function clampZoomFactor(factor) {
+  if (typeof factor !== 'number' || !Number.isFinite(factor)) {
+    return 1
+  }
+  return Math.min(MAX_ZOOM_FACTOR, Math.max(MIN_ZOOM_FACTOR, Math.round(factor * 100) / 100))
+}
+
+function stepZoomFactor(currentFactor, action) {
+  if (action === 'reset') {
+    return 1
+  }
+  if (action === 'in') {
+    const next = ZOOM_STEPS.find((step) => step > currentFactor + 0.001)
+    return next ?? MAX_ZOOM_FACTOR
+  }
+  if (action === 'out') {
+    for (let i = ZOOM_STEPS.length - 1; i >= 0; i -= 1) {
+      if (ZOOM_STEPS[i] < currentFactor - 0.001) {
+        return ZOOM_STEPS[i]
+      }
+    }
+    return MIN_ZOOM_FACTOR
+  }
+  return clampZoomFactor(currentFactor)
+}
+
+function applyZoomFactor(webContents, factor) {
+  const next = clampZoomFactor(factor)
+  webContents.setZoomFactor(next)
+  webContents.send('bwf:zoom-changed', next)
+  return next
+}
+
+function adjustWindowZoom(win, action) {
+  if (!win || win.isDestroyed()) {
+    return 1
+  }
+  const current = win.webContents.getZoomFactor()
+  const next = stepZoomFactor(current, action)
+  return applyZoomFactor(win.webContents, next)
+}
+
+function buildApplicationMenu() {
+  const isMac = process.platform === 'darwin'
+  const template = [
+    ...(isMac ? [{ role: 'appMenu' }] : []),
+    { role: 'fileMenu' },
+    { role: 'editMenu' },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        {
+          label: 'Actual Size',
+          accelerator: 'CmdOrCtrl+0',
+          click: (_item, focusedWindow) => {
+            adjustWindowZoom(focusedWindow, 'reset')
+          },
+        },
+        {
+          label: 'Zoom In',
+          accelerator: 'CmdOrCtrl+=',
+          click: (_item, focusedWindow) => {
+            adjustWindowZoom(focusedWindow, 'in')
+          },
+        },
+        {
+          label: 'Zoom Out',
+          accelerator: 'CmdOrCtrl+-',
+          click: (_item, focusedWindow) => {
+            adjustWindowZoom(focusedWindow, 'out')
+          },
+        },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    { role: 'windowMenu' },
+  ]
+  return Menu.buildFromTemplate(template)
+}
+
+function getZoomActionFromInput(input) {
+  if (input.type !== 'keyDown' || input.alt) {
+    return null
+  }
+  const primaryPressed = process.platform === 'darwin' ? input.meta && !input.control : input.control && !input.meta
+  if (!primaryPressed) {
+    return null
+  }
+  if (input.key === '+' || input.key === '=' || input.code === 'Equal' || input.code === 'NumpadAdd') {
+    return 'in'
+  }
+  if (
+    input.key === '-' ||
+    input.key === '_' ||
+    (input.code === 'Minus' && !input.shift) ||
+    input.code === 'NumpadSubtract'
+  ) {
+    return 'out'
+  }
+  if ((input.key === '0' && !input.shift) || input.code === 'Numpad0') {
+    return 'reset'
+  }
+  return null
+}
+
 async function createWindow() {
   const distDir = path.join(__dirname, '..', 'dist')
   const started = await createLocalServer(distDir)
@@ -181,9 +324,24 @@ async function createWindow() {
     autoHideMenuBar: true,
     icon: path.join(__dirname, 'icons', 'icon-512.png'),
     webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true,
+      sandbox: true,
     },
+  })
+
+  win.webContents.on('did-finish-load', () => {
+    void win.webContents.setVisualZoomLevelLimits(1, 5)
+  })
+
+  win.webContents.on('before-input-event', (event, input) => {
+    const action = getZoomActionFromInput(input)
+    if (!action) {
+      return
+    }
+    event.preventDefault()
+    adjustWindowZoom(win, action)
   })
 
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -206,6 +364,29 @@ async function createWindow() {
 }
 
 app.whenReady().then(() => {
+  Menu.setApplicationMenu(buildApplicationMenu())
+
+  ipcMain.handle('bwf:get-zoom', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    return win ? clampZoomFactor(win.webContents.getZoomFactor()) : 1
+  })
+
+  ipcMain.handle('bwf:zoom', (event, action) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win || !['in', 'out', 'reset'].includes(action)) {
+      return 1
+    }
+    return adjustWindowZoom(win, action)
+  })
+
+  ipcMain.handle('bwf:set-zoom', (event, factor) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) {
+      return 1
+    }
+    return applyZoomFactor(win.webContents, factor)
+  })
+
   void createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
