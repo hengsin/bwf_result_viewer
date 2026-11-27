@@ -110,6 +110,25 @@ async function createZipFromDirectory(sourceDir) {
   return Buffer.concat([...localParts, centralDir, eocd])
 }
 
+const RESERVED_UNDERSCORE_DIRS = new Set(['_locales', '_metadata'])
+
+async function assertNoReservedNames(dir, baseDir = dir) {
+  const entries = await readdir(dir, { withFileTypes: true })
+  for (const entry of entries) {
+    const fullPath = resolve(dir, entry.name)
+    const relPath = relative(baseDir, fullPath).replace(/\\/g, '/')
+    if (
+      entry.name.startsWith('_') &&
+      !(entry.isDirectory() && dir === baseDir && RESERVED_UNDERSCORE_DIRS.has(entry.name))
+    ) {
+      throw new Error(`Invalid Chrome extension path "${relPath}": names starting with "_" are reserved by Chrome.`)
+    }
+    if (entry.isDirectory()) {
+      await assertNoReservedNames(fullPath, baseDir)
+    }
+  }
+}
+
 execFileSync(process.execPath, [viteBin, 'build', '--mode', 'extension'], {
   cwd: rootDir,
   stdio: 'inherit',
@@ -119,7 +138,8 @@ await cp(resolve(rootDir, 'extension/manifest.json'), resolve(outDir, 'manifest.
 await cp(resolve(rootDir, 'extension/service-worker.js'), resolve(outDir, 'service-worker.js'))
 await mkdir(resolve(outDir, 'icons'), { recursive: true })
 await cp(resolve(rootDir, 'extension/icons'), resolve(outDir, 'icons'), { recursive: true })
-await writeFile(resolve(outDir, '__bwf_config.js'), 'window.__BWF_INITIAL_URL__ = "";\n', 'utf8')
+await writeFile(resolve(outDir, 'bwf-config.js'), 'window.__BWF_INITIAL_URL__ = "";\n', 'utf8')
+await assertNoReservedNames(outDir)
 
 console.log(`Chrome extension built at ${outDir}`)
 

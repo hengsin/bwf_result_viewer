@@ -56,7 +56,7 @@ const fetchViaCurl = async (target: string, accept: string): Promise<{ status: n
 const attachBwfMiddlewares = (middlewares: Connect.Server) => {
   const initialUrl = (process.env.BWF_INPUT_URL ?? process.env.VITE_INPUT_URL ?? '').trim()
 
-  middlewares.use('/__bwf_config.js', (_req: IncomingMessage, res: ServerResponse) => {
+  middlewares.use('/bwf-config.js', (_req: IncomingMessage, res: ServerResponse) => {
     res.statusCode = 200
     res.setHeader('content-type', 'application/javascript; charset=utf-8')
     res.setHeader('cache-control', 'no-store')

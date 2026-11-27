@@ -44,7 +44,7 @@ You can also run `npm run build` (`tsc -b && vite build`), `npm run preview`, or
 
 ## Chrome Extension (Manifest V3)
 
-Build the standalone Chrome Extension (opens as a Side Panel, no local server required):
+Build the standalone Chrome Extension (opens in a full browser tab, no local server required; clicking the icon while on a `bwfbadminton.com` tournament or schedule page automatically loads that URL):
 
 ```bash
 npm run build:extension

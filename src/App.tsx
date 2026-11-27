@@ -11,6 +11,7 @@ import {
   fetchCurrentMonthTournaments,
   fetchDayMatches,
   inferTournamentTimeZone,
+  normalizeInitialBwfUrl,
   validateBwfUrl,
 } from './lib/bwf'
 import { browserTimeZoneLabel, convertHtmlTimeText, fetchRawPageHtml } from './lib/content'
@@ -73,7 +74,7 @@ const DEFAULT_AUTO_REFRESH_INTERVAL_SEC = 60
 function getInitialUrl(): string {
   const queryUrl = new URLSearchParams(window.location.search).get('url')?.trim()
   if (queryUrl) {
-    return queryUrl
+    return normalizeInitialBwfUrl(queryUrl, getTodayIsoDate())
   }
   return window.__BWF_INITIAL_URL__?.trim() ?? ''
 }

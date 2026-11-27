@@ -545,3 +545,37 @@ export function applyDateToUrl(rawUrl: string, isoDate: string): string | null {
   const base = `${parsed.origin}${cleanPathname}`
   return `${base}/${isoDate}`
 }
+
+/**
+ * Normalizes an incoming `?url=` value from a browser tab (such as a BWF tournament page
+ * without a trailing `YYYY-MM-DD`, or with a trailing slash/query/hash) into a schedule URL.
+ */
+export function normalizeInitialBwfUrl(rawUrl: string, todayIso: string): string {
+  const trimmed = rawUrl.trim()
+  if (!trimmed) {
+    return ''
+  }
+  if (validateBwfUrl(trimmed).valid) {
+    return trimmed
+  }
+  const parsed = parseHttpUrl(trimmed)
+  if (!parsed) {
+    return trimmed
+  }
+  const cleanPathname = parsed.pathname.replace(/\/+$/, '')
+  const trailingDateMatch = /(\d{4}-\d{2}-\d{2})$/.exec(cleanPathname)
+  if (trailingDateMatch && isValidIsoDate(trailingDateMatch[1])) {
+    return `${parsed.origin}${cleanPathname}`
+  }
+  const isBwfHost =
+    parsed.hostname === 'bwfbadminton.com' || parsed.hostname.endsWith('.bwfbadminton.com')
+  if (isBwfHost) {
+    const tournamentMatch = /^\/tournament\/([^/]+)(?:\/([^/]+))?/i.exec(cleanPathname)
+    if (tournamentMatch && isValidIsoDate(todayIso)) {
+      const [, tmtId, slug] = tournamentMatch
+      const basePath = slug ? `/tournament/${tmtId}/${slug}` : `/tournament/${tmtId}`
+      return `${parsed.origin}${basePath}/results/${todayIso}`
+    }
+  }
+  return trimmed
+}

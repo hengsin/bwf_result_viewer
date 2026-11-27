@@ -111,7 +111,7 @@ function createLocalServer(distDir) {
       try {
         const reqUrl = new URL(req.url || '/', 'http://127.0.0.1')
 
-        if (reqUrl.pathname === '/__bwf_config.js') {
+        if (reqUrl.pathname === '/bwf-config.js') {
           res.statusCode = 200
           res.setHeader('content-type', 'application/javascript; charset=utf-8')
           res.setHeader('cache-control', 'no-store')
